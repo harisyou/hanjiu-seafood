@@ -1,15 +1,11 @@
-# 韓九嚴選生鮮 V2
+# 韓九嚴選生鮮 V3
 
-這個版本已整理成正確的 Next.js App Router 專案結構。
+包含前台詢價與 `/admin` 店家管理後台。
 
-上傳 GitHub 後，根目錄必須看到：
-- app/
-- lib/
-- supabase/
-- package.json
-- tsconfig.json
-- next-env.d.ts
+部署前請在 Supabase SQL Editor 執行：
 
-Vercel 環境變數：
-- NEXT_PUBLIC_SUPABASE_URL
-- NEXT_PUBLIC_SUPABASE_ANON_KEY
+`supabase/admin-upgrade.sql`
+
+管理員登入網址：
+
+`https://hanjiu-seafood.vercel.app/admin`
