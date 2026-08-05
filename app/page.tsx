@@ -119,7 +119,16 @@ export default function HomePage() {
           {products.map(product => (
             <article className="card" key={product.id}>
               <div className="photo">
-                {product.image_url ? <img src={product.image_url} alt={product.name} /> : <span>🐟</span>}
+                {product.image_url ? (
+                  <img
+                    src={product.image_url}
+                    alt={product.name}
+                    loading="lazy"
+                    onError={(event) => {
+                      event.currentTarget.style.display = "none";
+                    }}
+                  />
+                ) : <span>🐟</span>}
                 {product.featured && <b>老闆推薦</b>}
               </div>
               <div className="body">

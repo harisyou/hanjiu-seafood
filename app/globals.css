@@ -1,1 +1,69 @@
 *{box-sizing:border-box}body{margin:0;font-family:Arial,"Noto Sans TC",sans-serif;color:#102a2e;background:#f7faf9}a{color:inherit}button,input,select,textarea{font:inherit}.hero{min-height:560px;padding:24px 6vw;color:white;background:linear-gradient(135deg,#102e33,#0c6f6a 60%,#7eb9a9)}nav{display:flex;justify-content:space-between;align-items:center}nav div{display:flex;gap:14px}nav a{color:white;text-decoration:none}.hero section{max-width:1000px;margin:120px auto}.hero h1{font-size:clamp(56px,9vw,110px);margin:10px 0}.content{padding:80px 6vw}.heading{max-width:1200px;margin:auto auto 30px;display:flex;justify-content:space-between;align-items:end}.heading h2{font-size:42px;margin:5px 0}.grid{max-width:1200px;margin:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:22px}.card,.panel{background:white;border:1px solid #d7e3df;border-radius:22px;overflow:hidden}.photo{height:230px;background:#e6f2ef;display:grid;place-items:center;position:relative}.photo img{width:100%;height:100%;object-fit:cover}.photo span{font-size:80px}.photo b{position:absolute;top:15px;left:15px;background:white;padding:8px 12px;border-radius:999px}.body{padding:22px}.body h3{font-size:26px}.body button,.panel>button,form button{width:100%;padding:14px;border:0;border-radius:12px;background:#0c6f6a;color:white;font-weight:bold}.order{padding:70px 6vw;background:#f4efe5;display:grid;grid-template-columns:1fr 1fr;gap:24px}.panel{padding:26px}label{display:block;margin:12px 0;font-weight:bold}input,select,textarea{width:100%;margin-top:6px;padding:12px;border:1px solid #cfdcd8;border-radius:10px}.cartRow,.manageRow{display:flex;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid #e5ece9}.notice{background:#e4f2ee;padding:12px;border-radius:10px}.admin{padding:40px 5vw;min-height:100vh}.login{max-width:480px;margin:80px auto;background:white;padding:30px;border-radius:20px}.adminTop{display:flex;justify-content:space-between;align-items:start;max-width:1200px;margin:auto auto 24px}.adminTop button{width:auto;padding:10px 16px}.adminGrid{max-width:1200px;margin:auto;display:grid;grid-template-columns:420px 1fr;gap:24px}.check{display:flex;align-items:center;gap:10px}.check input{width:auto}.manageRow button{width:auto;padding:8px 10px}.orders{max-width:1200px;margin:24px auto}.orderCard{display:grid;grid-template-columns:1fr 1fr 2fr 160px;gap:16px;padding:15px 0;border-bottom:1px solid #e5ece9}@media(max-width:850px){.grid{grid-template-columns:1fr 1fr}.order,.adminGrid{grid-template-columns:1fr}.heading{display:block}.orderCard{grid-template-columns:1fr}}@media(max-width:560px){.grid{grid-template-columns:1fr}.hero section{margin-top:90px}.hero h1{font-size:58px}.content,.order,.admin{padding:50px 18px}.order{grid-template-columns:1fr}}
+
+
+/* Upgraded image uploader */
+.uploadDropzone{
+  margin-top:14px;
+  min-height:220px;
+  border:2px dashed #b8cfca;
+  border-radius:16px;
+  background:#f4faf8;
+  display:grid;
+  place-items:center;
+  text-align:center;
+  padding:18px;
+  cursor:pointer;
+  overflow:hidden;
+}
+.uploadDropzone:hover,.uploadDropzone.isDragging{
+  border-color:#0c6f6a;
+  background:#e8f5f1;
+}
+.uploadDropzone p{margin:8px 0 0;color:#617876}
+.uploadPreview{width:100%;height:260px;object-fit:cover;border-radius:12px}
+.hiddenFileInput{display:none}
+.selectedFileRow{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  margin-top:10px;
+  padding:10px 12px;
+  background:#edf7f4;
+  border-radius:10px;
+}
+.selectedFileRow span{
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+.selectedFileRow button,.cancelEditButton{
+  width:auto!important;
+  padding:8px 12px!important;
+  background:#fff!important;
+  color:#0c6f6a!important;
+  border:1px solid #bfd4cf!important;
+}
+.uploadHelp{display:block;margin:10px 0 16px;color:#637876;line-height:1.5}
+.cancelEditButton{width:100%!important;margin-top:10px}
+.manageProduct{display:flex;align-items:center;gap:12px;min-width:0}
+.manageProduct>div:last-child{display:flex;flex-direction:column;gap:4px;min-width:0}
+.manageProduct small{color:#6d7f7c}
+.manageThumb{
+  width:62px;
+  height:52px;
+  border-radius:10px;
+  overflow:hidden;
+  background:#e6f2ef;
+  display:grid;
+  place-items:center;
+  flex:0 0 auto;
+}
+.manageThumb img{width:100%;height:100%;object-fit:cover}
+.manageActions{display:flex;gap:8px}
+.manageActions button{width:auto!important;padding:8px 10px!important}
+@media(max-width:700px){
+  .manageRow{align-items:flex-start;flex-direction:column}
+  .manageActions{width:100%}
+  .manageActions button{flex:1}
+}
