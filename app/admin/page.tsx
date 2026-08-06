@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase-browser";
 import { Product } from "@/lib/catalog";
 
 type Order = { id: string; customer_name: string; phone: string; fulfillment: string; processing: string; note: string | null; status: string; created_at: string };
+type OrderItem = { id: string; order_id: string; product_name: string; variant_name: string | null; quantity: number; processing_preset_name: string | null; processing_option_names: string[]; processing_note: string | null };
 const blank = { name: "", description: "", cooking: "", status: "available" as Product["status"], featured: false, sort_order: 100 };
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_SOURCE_SIZE = 20 * 1024 * 1024;
@@ -46,6 +47,7 @@ export default function AdminPage() {
   const [user, setUser] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null);
@@ -56,14 +58,16 @@ export default function AdminPage() {
   const [dragging, setDragging] = useState(false);
 
   const loadAll = useCallback(async () => {
-    const [productResult, orderResult] = await Promise.all([
+    const [productResult, orderResult, orderItemResult] = await Promise.all([
       supabase.from("products").select("*").order("sort_order"),
-      supabase.from("orders").select("*").order("created_at", { ascending: false })
+      supabase.from("orders").select("*").order("created_at", { ascending: false }),
+      supabase.from("order_items").select("id,order_id,product_name,variant_name,quantity,processing_preset_name,processing_option_names,processing_note")
     ]);
     if (productResult.error) setNotice(`商品載入失敗：${productResult.error.message}`);
     else setProducts((productResult.data || []) as Product[]);
     if (orderResult.error) setNotice(`訂單載入失敗：${orderResult.error.message}`);
     else setOrders((orderResult.data || []) as Order[]);
+    if (!orderItemResult.error) setOrderItems((orderItemResult.data || []) as OrderItem[]);
   }, [supabase]);
 
   useEffect(() => {
@@ -172,9 +176,9 @@ export default function AdminPage() {
           {editingId && <button className="cancelEditButton" type="button" onClick={resetForm}>取消編輯</button>}
           {notice && <p className="notice">{notice}</p>}
         </form>
-        <section className="panel"><h2>商品管理</h2>{products.map((product) => <div className="manageRow" key={product.id}><div className="manageProduct"><div className="manageThumb">{product.image_url ? <img src={product.image_url} alt={product.name} /> : <span>🦀</span>}</div><div><strong>{product.name}</strong><small>{product.status === "available" ? "可購買" : product.status === "sold_out" ? "已售完" : "已隱藏"}</small></div></div><div className="manageActions"><Link className="buttonLink" href={`/admin/variants?productId=${product.id}`}>⚖️ 管理規格</Link><button type="button" onClick={() => editProduct(product)}>編輯</button><button type="button" onClick={() => toggle(product)}>{product.status === "available" ? "下架" : "上架"}</button><button type="button" onClick={() => remove(product)}>刪除</button></div></div>)}</section>
+        <section className="panel"><h2>商品管理</h2>{products.map((product) => <div className="manageRow" key={product.id}><div className="manageProduct"><div className="manageThumb">{product.image_url ? <img src={product.image_url} alt={product.name} /> : <span>🦀</span>}</div><div><strong>{product.name}</strong><small>{product.status === "available" ? "可購買" : product.status === "sold_out" ? "已售完" : "已隱藏"}</small></div></div><div className="manageActions"><Link className="buttonLink" href={`/admin/variants?productId=${product.id}`}>⚖️ 管理規格</Link><Link className="buttonLink" href={`/admin/processing?productId=${product.id}`}>🐟 處理設定</Link><button type="button" onClick={() => editProduct(product)}>編輯</button><button type="button" onClick={() => toggle(product)}>{product.status === "available" ? "下架" : "上架"}</button><button type="button" onClick={() => remove(product)}>刪除</button></div></div>)}</section>
       </section>
-      <section className="panel orders"><h2>訂單管理</h2>{orders.map((order) => <article className="orderCard" key={order.id}><div><strong>{order.customer_name}</strong><p>{order.phone}</p></div><div><p>{order.fulfillment}</p><p>{order.processing}</p></div><div><p>{order.note || "沒有備註"}</p></div><select value={order.status} onChange={(e) => setOrderStatus(order.id, e.target.value)}><option value="new">新訂單</option><option value="contacted">已聯絡</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></article>)}</section>
+      <section className="panel orders"><h2>訂單管理</h2>{orders.map((order) => <article className="orderCard" key={order.id}><div><strong>{order.customer_name}</strong><p>{order.phone}</p></div><div><p>{order.fulfillment}</p><p>{order.processing}</p></div><div><p>{order.note || "沒有備註"}</p>{orderItems.filter((item) => item.order_id === order.id).map((item) => <div className="adminOrderItem" key={item.id}><strong>{item.product_name}｜{item.variant_name}｜×{item.quantity}</strong><small>處理：{item.processing_preset_name || "不處理"}{item.processing_option_names?.length ? `｜${item.processing_option_names.join("、")}` : ""}</small>{item.processing_note && <small>其他需求：{item.processing_note}</small>}</div>)}</div><select value={order.status} onChange={(e) => setOrderStatus(order.id, e.target.value)}><option value="new">新訂單</option><option value="contacted">已聯絡</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></article>)}</section>
     </main>
   );
 }

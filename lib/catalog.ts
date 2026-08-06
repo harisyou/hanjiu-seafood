@@ -9,6 +9,7 @@ export type Product = {
   status: ProductStatus;
   featured: boolean;
   sort_order: number;
+  processing_enabled?: boolean;
 };
 
 export type ProductVariant = {
@@ -20,6 +21,12 @@ export type ProductVariant = {
   active: boolean;
   sort_order: number;
 };
+
+export type ProcessingOption = { id: string; name: string; active: boolean; sort_order: number };
+export type ProcessingPreset = { id: string; name: string; description: string | null; active: boolean; sort_order: number };
+export type ProcessingPresetOption = { preset_id: string; processing_option_id: string };
+export type ProductProcessingOption = { product_id: string; processing_option_id: string; active: boolean; recommended: boolean; sort_order: number };
+export type ProductProcessingPreset = { product_id: string; preset_id: string; active: boolean; recommended: boolean; is_default: boolean; sort_order: number };
 
 export function inventoryLabel(inventory: number) {
   if (inventory <= 0) return "已售完";
