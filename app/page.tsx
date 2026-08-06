@@ -31,11 +31,11 @@ type CheckoutForm = {
 };
 
 const CHECKOUT_PROFILE_KEY = "hanjiu-checkout-profile-v1";
-const deliveryMethods: Array<{ value: DeliveryMethod; detail: string }> = [
-  { value: "永春市場自取", detail: "到市場取貨，新鮮又快速" },
-  { value: "台北市配送", detail: "購物車滿 2,500 即可選擇" },
-  { value: "冷凍宅配", detail: "韓九補貼一半運費" },
-  { value: "7-ELEVEN 冷凍交貨便", detail: "依商品及數量安排" }
+const deliveryMethods: Array<{ value: DeliveryMethod; icon: string; detail: string; recommendation: string }> = [
+  { value: "永春市場自取", icon: "📍", detail: "可提前預留商品", recommendation: "最省運費" },
+  { value: "台北市配送", icon: "🚚", detail: "單筆滿 2500 可配送到府", recommendation: "台北最方便" },
+  { value: "冷凍宅配", icon: "❄️", detail: "韓九補貼一半運費", recommendation: "外縣市推薦" },
+  { value: "7-ELEVEN 冷凍交貨便", icon: "🏪", detail: "韓九補貼一半運費", recommendation: "超商取貨" }
 ];
 
 function getPurchaseLimit(variant: ProductVariant) {
@@ -466,10 +466,13 @@ export default function HomePage() {
               const unavailable = method.value === "台北市配送" && total < shippingThreshold;
               const selected = form.fulfillment === method.value;
               return <label className={`deliveryOption ${selected ? "isSelected" : ""} ${unavailable ? "isDisabled" : ""}`} key={method.value}>
-                <input type="radio" name="delivery" value={method.value} checked={selected} disabled={unavailable} onChange={() => setForm((current) => ({ ...current, fulfillment: method.value }))} />
-                <span className="deliveryCheck" aria-hidden="true">{selected ? "✓" : ""}</span><span><strong>{method.value}</strong><small>{unavailable ? `再買 ${shippingRemaining.toLocaleString("zh-TW")} 即可享台北市配送` : method.detail}</small></span>
+                <input type="radio" name="delivery" value={method.value} aria-label={method.value} checked={selected} disabled={unavailable} onChange={() => setForm((current) => ({ ...current, fulfillment: method.value }))} />
+                <span className="deliveryIcon" aria-hidden="true">{method.icon}</span><span className="deliveryCopy"><span className="deliveryTitle"><strong>{method.value}</strong><small className="recommendationLabel">{method.recommendation}</small></span><small className="deliverySubtitle">{method.value === "台北市配送" ? unavailable ? <>🚚 再買 <b>{shippingRemaining.toLocaleString("zh-TW")}</b> 即可享台北市配送</> : "已符合台北市配送資格" : method.detail}</small></span><span className="deliveryCheck" aria-hidden="true">{selected ? "✓" : ""}</span>
               </label>;
-            })}</div></fieldset>
+            })}</div>
+              <div className="subsidyMessage" aria-live="polite">{(form.fulfillment === "冷凍宅配" || form.fulfillment === "7-ELEVEN 冷凍交貨便") && "💚 韓九已補貼一半運費，讓您享有更優惠的配送服務。"}</div>
+              <details className="deliveryExplanation"><summary>配送說明</summary><div className="deliveryExplanationBody"><div><strong>📍 永春市場自取</strong><p>請依約定時間至永春市場取貨。</p></div><div><strong>🚚 台北市配送</strong><p>單筆消費滿 2500，即可協助配送到府。</p></div><div><strong>❄️ 冷凍宅配</strong><p>韓九補貼一半運費。</p></div><div><strong>🏪 7-ELEVEN 冷凍交貨便</strong><p>韓九補貼一半運費，實際寄送仍依商品及數量安排。</p></div></div></details>
+            </fieldset>
             <div className="checkoutFields"><label>姓名<input autoComplete="name" value={form.customer_name} onChange={(event) => setForm({ ...form, customer_name: event.target.value })} /></label><label>電話<input type="tel" inputMode="tel" autoComplete="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
               {form.fulfillment === "永春市場自取" && <><label>取貨日期<input type="date" value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>取貨時間<input type="time" value={form.pickupTime} onChange={(event) => setForm({ ...form, pickupTime: event.target.value })} /></label></>}
               {(form.fulfillment === "台北市配送" || form.fulfillment === "冷凍宅配") && <><label className="fullField">{form.fulfillment === "台北市配送" ? "配送地址" : "收件地址"}<input autoComplete="street-address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label><label>希望{form.fulfillment === "台北市配送" ? "配送" : "到貨"}日期（選填）<input type="date" value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>希望時間（選填）<input type="time" value={form.pickupTime} onChange={(event) => setForm({ ...form, pickupTime: event.target.value })} /></label></>}
