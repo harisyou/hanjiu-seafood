@@ -78,6 +78,7 @@ export default function HomePage() {
   const [productProcessingOptions, setProductProcessingOptions] = useState<ProductProcessingOption[]>([]);
   const [productProcessingPresets, setProductProcessingPresets] = useState<ProductProcessingPreset[]>([]);
   const [productProcessing, setProductProcessing] = useState<Record<string, ProcessingSelection>>({});
+  const [customProcessingOpen, setCustomProcessingOpen] = useState<Record<string, boolean>>({});
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, number>>({});
   const [cartActionStatuses, setCartActionStatuses] = useState<Record<string, CartActionStatus>>({});
@@ -386,6 +387,7 @@ export default function HomePage() {
 
   function selectProcessingPreset(productId: string, presetId: string) {
     setProductProcessing((current) => ({ ...current, [productId]: { ...(current[productId] || { note: "" }), presetId, optionIds: presetOptionIds(presetId, productId) } }));
+    setCustomProcessingOpen((current) => ({ ...current, [productId]: false }));
   }
 
   function toggleProcessingOption(productId: string, optionId: string) {
@@ -565,10 +567,9 @@ export default function HomePage() {
                     </div>
                     {product.processing_enabled && <section className="productProcessing" aria-labelledby={`processing-${product.id}`}>
                       <h4 id={`processing-${product.id}`}>🐟 魚貨處理方式</h4>
-                      {availableProcessingPresets.length > 0 && <div className="processingPresetCards" role="radiogroup" aria-label={`${product.name}處理套餐`}>{availableProcessingPresets.map(({ config, preset }) => <label className={`processingPresetCard ${processingSelection.presetId === preset.id ? "isSelected" : ""}`} key={preset.id}><input type="radio" name={`processing-${product.id}`} checked={processingSelection.presetId === preset.id} onChange={() => selectProcessingPreset(product.id, preset.id)} /><span><strong>{preset.name}{config.recommended && <small>建議</small>}</strong><span>{preset.description}</span></span></label>)}</div>}
-                      {availableProcessingOptions.length > 0 && <fieldset className="processingCustom"><legend>客製化處理（可複選）</legend><div>{availableProcessingOptions.map((option) => <label key={option.id}><input type="checkbox" checked={processingSelection.optionIds.includes(option.id)} onChange={() => toggleProcessingOption(product.id, option.id)} /><span>{option.name}</span></label>)}</div></fieldset>}
+                      {availableProcessingPresets.length > 0 && <div className="processingPresetCards" role="radiogroup" aria-label={`${product.name}處理套餐`}>{availableProcessingPresets.map(({ preset }) => <label className={`processingPresetCard ${processingSelection.presetId === preset.id && !customProcessingOpen[product.id] ? "isSelected" : ""}`} key={preset.id}><input type="radio" name={`processing-${product.id}`} checked={processingSelection.presetId === preset.id && !customProcessingOpen[product.id]} onChange={() => selectProcessingPreset(product.id, preset.id)} /><span><strong>{preset.name}{preset.id === "three-clean" && <small>推薦</small>}</strong><span className="processingHelper">{preset.id === "none" ? <>💡 保留完整魚身，回家自行處理。</> : preset.id === "three-clean" ? <>🍳 適合大部分家庭料理。<br />🐟 去魚鱗、去內臟、去魚鰓。</> : preset.id === "three-remove" ? <>🍳 適合紅燒、清蒸或直接下鍋。<br />🐟 去頭、去尾、去內臟。</> : preset.description}</span></span></label>)}{availableProcessingOptions.length > 0 && <label className={`processingPresetCard customProcessingChoice ${customProcessingOpen[product.id] ? "isSelected" : ""}`}><input type="radio" name={`processing-${product.id}`} checked={Boolean(customProcessingOpen[product.id])} aria-expanded={Boolean(customProcessingOpen[product.id])} aria-controls={`custom-processing-${product.id}`} onChange={() => setCustomProcessingOpen((current) => ({ ...current, [product.id]: true }))} /><span><strong>我要自己選處理方式</strong><span className="processingHelper">依照料理需求自由複選。</span></span></label>}</div>}
+                      {availableProcessingOptions.length > 0 && <div className={`processingCustomReveal ${customProcessingOpen[product.id] ? "isOpen" : ""}`} id={`custom-processing-${product.id}`} aria-hidden={!customProcessingOpen[product.id]}><fieldset className="processingCustom" disabled={!customProcessingOpen[product.id]}><legend>客製化處理（可複選）</legend><div>{availableProcessingOptions.map((option) => <label key={option.id}><input type="checkbox" checked={processingSelection.optionIds.includes(option.id)} onChange={() => toggleProcessingOption(product.id, option.id)} /><span>{option.name}</span></label>)}</div></fieldset></div>}
                       <label className="processingNote">其他處理需求（選填）<textarea rows={3} placeholder={"例如：\n保留魚頭煮湯\n保留魚卵\n不要切太小\n魚皮保留"} value={processingSelection.note} onChange={(event) => setProductProcessing((current) => ({ ...current, [product.id]: { ...processingSelection, note: event.target.value } }))} /></label>
-                      {availableProcessingPresets.some(({ preset }) => preset.id === "three-clean") && <p className="processingGuidance">💡 不知道怎麼選？<br />一般家庭料理建議選「三清」。</p>}
                       <p className="processingSelectionStatus" aria-live="polite">目前選擇：{processingSelectionDisplay.presetName}{processingSelectionDisplay.optionNames.length ? `｜${processingSelectionDisplay.optionNames.join("、")}` : ""}</p>
                     </section>}
                     <div className="variantQuantity">
