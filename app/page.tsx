@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { formatPrice, Product, ProductVariant } from "@/lib/catalog";
 
@@ -14,6 +14,8 @@ type CartItem = {
   quantity: number;
 };
 
+type CartActionStatus = "idle" | "adding" | "success" | "error";
+
 function getPurchaseLimit(variant: ProductVariant) {
   return variant.inventory;
 }
@@ -24,9 +26,17 @@ export default function HomePage() {
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, number>>({});
+  const [cartActionStatuses, setCartActionStatuses] = useState<Record<string, CartActionStatus>>({});
+  const [productFeedback, setProductFeedback] = useState<Record<string, string>>({});
   const [cart, setCart] = useState<CartItem[]>([]);
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ customer_name: "", phone: "", line_id: "", fulfillment: "到店取貨", processing: "不處理", note: "" });
+  const feedbackTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const cartActionLocks = useRef(new Set<string>());
+
+  useEffect(() => () => {
+    Object.values(feedbackTimers.current).forEach(clearTimeout);
+  }, []);
 
   useEffect(() => {
     async function loadCatalog() {
@@ -84,29 +94,65 @@ export default function HomePage() {
   }, [products, variants]);
 
   function selectVariant(productId: string, variantId: string) {
+    clearTimeout(feedbackTimers.current[productId]);
+    cartActionLocks.current.delete(productId);
     setSelectedVariants((current) => ({ ...current, [productId]: variantId }));
     setSelectedQuantities((current) => ({ ...current, [productId]: 1 }));
+    setCartActionStatuses((current) => ({ ...current, [productId]: "idle" }));
+    setProductFeedback((current) => ({ ...current, [productId]: "" }));
   }
 
-  function setProductQuantity(productId: string, inventory: number, quantity: number) {
+  function showProductFeedback(productId: string, message: string, onClear?: () => void) {
+    clearTimeout(feedbackTimers.current[productId]);
+    setProductFeedback((current) => ({ ...current, [productId]: message }));
+    feedbackTimers.current[productId] = setTimeout(() => {
+      setProductFeedback((current) => ({ ...current, [productId]: "" }));
+      onClear?.();
+    }, 1800);
+  }
+
+  function setProductQuantity(productId: string, inventory: number, quantity: number, announceLimit = false) {
     const nextQuantity = Math.min(inventory, Math.max(1, quantity));
     setSelectedQuantities((current) => ({ ...current, [productId]: nextQuantity }));
+    if (announceLimit && nextQuantity >= inventory) {
+      showProductFeedback(productId, "已達本次限購上限");
+    }
   }
 
-  function addToCart(product: Product) {
-    const variantId = selectedVariants[product.id];
-    const variant = variants.find((item) => item.id === variantId && item.product_id === product.id);
-    if (!variant) return setNotice(`請先選擇「${product.name}」的規格。`);
-    const purchaseLimit = getPurchaseLimit(variant);
-    if (product.status !== "available" || purchaseLimit <= 0) return setNotice("此規格目前已售完。");
-    const quantity = Math.min(purchaseLimit, Math.max(1, selectedQuantities[product.id] || 1));
+  async function addToCart(product: Product) {
+    if (cartActionLocks.current.has(product.id)) return;
+    cartActionLocks.current.add(product.id);
 
-    setCart((items) => {
-      const found = items.find((item) => item.variant_id === variant.id);
-      if (found) return items.map((item) => item.variant_id === variant.id ? { ...item, quantity: item.quantity + quantity } : item);
-      return [...items, { product_id: product.id, product_name: product.name, variant_id: variant.id, variant_name: variant.name, price: variant.price, quantity }];
-    });
-    setNotice(`${product.name}（${variant.name}）已加入購物車。`);
+    clearTimeout(feedbackTimers.current[product.id]);
+    setProductFeedback((current) => ({ ...current, [product.id]: "" }));
+    setCartActionStatuses((current) => ({ ...current, [product.id]: "adding" }));
+
+    try {
+      const variantId = selectedVariants[product.id];
+      const variant = variants.find((item) => item.id === variantId && item.product_id === product.id);
+      if (!variant) throw new Error("No variant selected");
+      const purchaseLimit = getPurchaseLimit(variant);
+      if (product.status !== "available" || purchaseLimit <= 0) throw new Error("Variant unavailable");
+      const quantity = Math.min(purchaseLimit, Math.max(1, selectedQuantities[product.id] || 1));
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      setCart((items) => {
+        const found = items.find((item) => item.variant_id === variant.id);
+        if (found) return items.map((item) => item.variant_id === variant.id ? { ...item, quantity: item.quantity + quantity } : item);
+        return [...items, { product_id: product.id, product_name: product.name, variant_id: variant.id, variant_name: variant.name, price: variant.price, quantity }];
+      });
+      setCartActionStatuses((current) => ({ ...current, [product.id]: "success" }));
+      showProductFeedback(product.id, `${variant.name} × ${quantity} 已加入購物車`, () => {
+        cartActionLocks.current.delete(product.id);
+        setCartActionStatuses((current) => ({ ...current, [product.id]: "idle" }));
+      });
+    } catch {
+      cartActionLocks.current.delete(product.id);
+      setCartActionStatuses((current) => ({ ...current, [product.id]: "error" }));
+      showProductFeedback(product.id, "加入購物車失敗，請再試一次", () => {
+        setCartActionStatuses((current) => ({ ...current, [product.id]: "idle" }));
+      });
+    }
   }
 
   function changeQuantity(variantId: string, quantity: number) {
@@ -152,6 +198,16 @@ export default function HomePage() {
             const selectedQuantity = selectedQuantities[product.id] || 1;
             const purchaseLimit = selectedVariant ? getPurchaseLimit(selectedVariant) : 0;
             const soldOut = purchasableVariants.length === 0;
+            const cartActionStatus = cartActionStatuses[product.id] || "idle";
+            const addButtonText = soldOut
+              ? "已售完"
+              : !selectedVariant
+                ? "請先選擇規格"
+                : cartActionStatus === "adding"
+                  ? "加入中…"
+                  : cartActionStatus === "success"
+                    ? "✓ 已加入購物車"
+                    : "加入購物車";
             return <article className="card" key={product.id}>
               <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span>🦀</span>}{product.featured && <b>本日精選</b>}</div>
               <div className="body"><small>{product.status === "available" ? "今日供應" : "已售完"}</small><h3>{product.name}</h3><p>{product.description}</p><p>料理建議：{product.cooking || "歡迎詢問"}</p>
@@ -170,13 +226,14 @@ export default function HomePage() {
                       <span>數量</span>
                       <div>
                         <button type="button" aria-label="減少數量" disabled={selectedQuantity <= 1} onClick={() => setProductQuantity(product.id, purchaseLimit, selectedQuantity - 1)}>−</button>
-                        <strong>{selectedQuantity}</strong>
-                        <button type="button" aria-label="增加數量" disabled={selectedQuantity >= purchaseLimit} onClick={() => setProductQuantity(product.id, purchaseLimit, selectedQuantity + 1)}>＋</button>
+                        <strong className="quantityValue" key={`${selectedVariant.id}-${selectedQuantity}`}>{selectedQuantity}</strong>
+                        <button type="button" aria-label="增加數量" disabled={selectedQuantity >= purchaseLimit} onClick={() => setProductQuantity(product.id, purchaseLimit, selectedQuantity + 1, true)}>＋</button>
                       </div>
                     </div>}
                   </>}
                 </div>}
-                <button disabled={soldOut || !selectedVariant} onClick={() => addToCart(product)}>{soldOut ? "已售完" : !selectedVariant ? "請先選擇規格" : "加入購物車"}</button>
+                <button className={`addToCartButton ${cartActionStatus === "success" ? "isSuccess" : ""} ${cartActionStatus === "error" ? "isError" : ""}`} disabled={soldOut || !selectedVariant || cartActionStatus === "adding" || cartActionStatus === "success"} aria-busy={cartActionStatus === "adding"} onClick={() => addToCart(product)}>{addButtonText}</button>
+                <div className={`productFeedback ${cartActionStatus === "success" ? "isSuccess" : ""} ${cartActionStatus === "error" ? "isError" : ""}`} aria-live="polite" aria-atomic="true">{productFeedback[product.id] || ""}</div>
               </div>
             </article>;
           })}
