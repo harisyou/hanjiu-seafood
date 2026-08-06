@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { formatPrice, inventoryLabel, Product, ProductVariant } from "@/lib/catalog";
+import { formatPrice, Product, ProductVariant } from "@/lib/catalog";
 
 type CartItem = {
   product_id: string;
@@ -13,6 +13,10 @@ type CartItem = {
   price: number;
   quantity: number;
 };
+
+function getPurchaseLimit(variant: ProductVariant) {
+  return variant.inventory;
+}
 
 export default function HomePage() {
   const supabase = useMemo(() => createClient(), []);
@@ -44,7 +48,7 @@ export default function HomePage() {
     products.forEach((product) => {
       const availableVariants = variants.filter((variant) =>
         variant.product_id === product.id &&
-        variant.inventory > 0 &&
+        getPurchaseLimit(variant) > 0 &&
         product.status === "available"
       );
       if (availableVariants.length === 1) automaticSelections[product.id] = availableVariants[0].id;
@@ -93,8 +97,9 @@ export default function HomePage() {
     const variantId = selectedVariants[product.id];
     const variant = variants.find((item) => item.id === variantId && item.product_id === product.id);
     if (!variant) return setNotice(`請先選擇「${product.name}」的規格。`);
-    if (product.status !== "available" || variant.inventory <= 0) return setNotice("此規格目前已售完。");
-    const quantity = Math.min(variant.inventory, Math.max(1, selectedQuantities[product.id] || 1));
+    const purchaseLimit = getPurchaseLimit(variant);
+    if (product.status !== "available" || purchaseLimit <= 0) return setNotice("此規格目前已售完。");
+    const quantity = Math.min(purchaseLimit, Math.max(1, selectedQuantities[product.id] || 1));
 
     setCart((items) => {
       const found = items.find((item) => item.variant_id === variant.id);
@@ -138,41 +143,40 @@ export default function HomePage() {
     <main>
       <header className="hero"><nav><strong>漢久海鮮</strong><div><Link href="/admin">後台管理</Link><a href="#order">查看購物車</a></div></nav><section><p>每日嚴選，新鮮直送</p><h1>今天，吃好魚。</h1><p>挑選想要的商品與規格，送出訂單後由我們與你確認取貨細節。</p></section></header>
       <section className="content">
-        <div className="heading"><div><small>TODAY&apos;S CATCH</small><h2>今日海鮮</h2></div><p>每個規格皆有獨立價格與供應狀態，庫存以頁面顯示為準。</p></div>
+        <div className="heading"><div><small>TODAY&apos;S CATCH</small><h2>今日海鮮</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
         <div className="grid">
           {products.map((product) => {
             const productVariants = variants.filter((variant) => variant.product_id === product.id);
-            const selectedVariant = productVariants.find((variant) => variant.id === selectedVariants[product.id]);
+            const purchasableVariants = productVariants.filter((variant) => getPurchaseLimit(variant) > 0 && product.status === "available");
+            const selectedVariant = purchasableVariants.find((variant) => variant.id === selectedVariants[product.id]);
             const selectedQuantity = selectedQuantities[product.id] || 1;
-            const selectedVariantSoldOut = Boolean(selectedVariant && (selectedVariant.inventory <= 0 || product.status !== "available"));
+            const purchaseLimit = selectedVariant ? getPurchaseLimit(selectedVariant) : 0;
+            const soldOut = purchasableVariants.length === 0;
             return <article className="card" key={product.id}>
               <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span>🦀</span>}{product.featured && <b>本日精選</b>}</div>
               <div className="body"><small>{product.status === "available" ? "今日供應" : "已售完"}</small><h3>{product.name}</h3><p>{product.description}</p><p>料理建議：{product.cooking || "歡迎詢問"}</p>
-                {productVariants.length > 0 && <div className="variantSelector">
+                {purchasableVariants.length > 0 && <div className="variantSelector">
                   <label htmlFor={`variant-${product.id}`}>選擇規格</label>
                   <select id={`variant-${product.id}`} value={selectedVariants[product.id] || ""} onChange={(event) => selectVariant(product.id, event.target.value)}>
                     <option value="" disabled>請選擇規格</option>
-                    {productVariants.map((variant) => {
-                      const soldOut = variant.inventory <= 0 || product.status !== "available";
-                      return <option value={variant.id} key={variant.id} disabled={soldOut}>{variant.name}｜{formatPrice(variant.price)}{soldOut ? "｜已售完" : ""}</option>;
-                    })}
+                    {purchasableVariants.map((variant) => <option value={variant.id} key={variant.id}>{variant.name}｜{formatPrice(variant.price)}</option>)}
                   </select>
                   {selectedVariant && <>
                     <div className="variantDetails">
                       <div><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
-                      <div><span>庫存</span><strong>{inventoryLabel(selectedVariant.inventory)}</strong></div>
+                      <div><span>本次限購</span><strong>{purchaseLimit} 隻</strong>{purchaseLimit === 1 && <small className="rareNotice">🔥 最後一份</small>}</div>
                     </div>
-                    {selectedVariant.inventory > 0 && <div className="variantQuantity">
+                    {purchaseLimit > 0 && <div className="variantQuantity">
                       <span>數量</span>
                       <div>
-                        <button type="button" aria-label="減少數量" disabled={selectedQuantity <= 1} onClick={() => setProductQuantity(product.id, selectedVariant.inventory, selectedQuantity - 1)}>−</button>
+                        <button type="button" aria-label="減少數量" disabled={selectedQuantity <= 1} onClick={() => setProductQuantity(product.id, purchaseLimit, selectedQuantity - 1)}>−</button>
                         <strong>{selectedQuantity}</strong>
-                        <button type="button" aria-label="增加數量" disabled={selectedQuantity >= selectedVariant.inventory} onClick={() => setProductQuantity(product.id, selectedVariant.inventory, selectedQuantity + 1)}>＋</button>
+                        <button type="button" aria-label="增加數量" disabled={selectedQuantity >= purchaseLimit} onClick={() => setProductQuantity(product.id, purchaseLimit, selectedQuantity + 1)}>＋</button>
                       </div>
                     </div>}
                   </>}
                 </div>}
-                <button disabled={!selectedVariant || selectedVariantSoldOut} onClick={() => addToCart(product)}>{!selectedVariant ? "請先選擇規格" : selectedVariantSoldOut ? "此規格已售完" : "加入購物車"}</button>
+                <button disabled={soldOut || !selectedVariant} onClick={() => addToCart(product)}>{soldOut ? "已售完" : !selectedVariant ? "請先選擇規格" : "加入購物車"}</button>
               </div>
             </article>;
           })}
