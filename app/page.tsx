@@ -349,14 +349,14 @@ export default function HomePage() {
               const cartBusy = cartActionStatuses[item.product_id] === "adding";
               return <article className="drawerCartItem" key={item.variant_id}>
                 <div className="drawerItemImage">{product?.image_url ? <img src={product.image_url} alt={item.product_name} /> : <span>🐟</span>}</div>
-                <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className="priceTag">{item.price.toLocaleString("zh-TW")}</span><strong className="itemSubtotal">小計 {formatPrice(item.price * item.quantity)}</strong></div>
+                <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className="priceTag">{item.price.toLocaleString("zh-TW")}</span><strong className="itemSubtotal">小計 {(item.price * item.quantity).toLocaleString("zh-TW")}</strong></div>
                 <div className="drawerItemActions"><div className="quantity"><button type="button" aria-label={`減少 ${item.variant_name} 數量`} disabled={cartBusy} onClick={() => changeQuantity(item.variant_id, item.quantity - 1)}>−</button><span>{item.quantity}</span><button type="button" aria-label={`增加 ${item.variant_name} 數量`} disabled={cartBusy || !variant || item.quantity >= purchaseLimit} onClick={() => changeQuantity(item.variant_id, item.quantity + 1)}>＋</button></div><button className="removeCartItem" type="button" disabled={cartBusy} onClick={() => changeQuantity(item.variant_id, 0)}>移除</button></div>
               </article>;
             })}
           </div>
           <footer className="cartDrawerFooter">
             <div className="shippingProgress" aria-live="polite">{shippingRemaining > 0 ? <><p>再買 {shippingRemaining.toLocaleString("zh-TW")} 即可享台北配送</p><div className="progressTrack" role="progressbar" aria-label="台北配送資格進度" aria-valuemin={0} aria-valuemax={shippingThreshold} aria-valuenow={total}><span style={{ width: `${shippingProgress}%` }} /></div></> : <p className="shippingQualified">🎉 已符合台北配送資格</p>}</div>
-            <div className="drawerSubtotal"><span>購物車小計</span><strong>{formatPrice(total)}</strong></div>
+            <div className="drawerSubtotal"><span>購物車小計</span><strong>{total.toLocaleString("zh-TW")}</strong></div>
             <button className="checkoutButton" type="button" disabled={cart.length === 0} onClick={goToCheckout}>立即結帳</button>
             <button className="continueShoppingButton" type="button" onClick={() => setDrawerOpen(false)}>← 繼續挑魚</button>
           </footer>
