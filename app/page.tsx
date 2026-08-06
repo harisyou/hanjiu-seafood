@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { formatPrice, inventoryLabel, Product, ProductVariant } from "@/lib/catalog";
+import { formatPrice, Product, ProductVariant } from "@/lib/catalog";
 
 type CartItem = {
   product_id: string;
@@ -36,6 +36,23 @@ export default function HomePage() {
     }
     loadCatalog();
   }, [supabase]);
+
+  useEffect(() => {
+    setSelectedVariants((current) => {
+      const next = { ...current };
+      let changed = false;
+
+      products.forEach((product) => {
+        const productVariants = variants.filter((variant) => variant.product_id === product.id);
+        if (productVariants.length === 1 && !next[product.id]) {
+          next[product.id] = productVariants[0].id;
+          changed = true;
+        }
+      });
+
+      return changed ? next : current;
+    });
+  }, [products, variants]);
 
   function addToCart(product: Product) {
     const variantId = selectedVariants[product.id];
@@ -89,13 +106,21 @@ export default function HomePage() {
         <div className="grid">
           {products.map((product) => {
             const productVariants = variants.filter((variant) => variant.product_id === product.id);
+            const selectedVariant = productVariants.find((variant) => variant.id === selectedVariants[product.id]);
             return <article className="card" key={product.id}>
               <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span>🦀</span>}{product.featured && <b>本日精選</b>}</div>
               <div className="body"><small>{product.status === "available" ? "今日供應" : "已售完"}</small><h3>{product.name}</h3><p>{product.description}</p><p>料理建議：{product.cooking || "歡迎詢問"}</p>
-                <fieldset className="variantOptions"><legend>選擇規格</legend>{productVariants.length === 0 ? <p>尚無可選規格</p> : productVariants.map((variant) => {
-                  const soldOut = variant.inventory <= 0 || product.status !== "available";
-                  return <label className={`variantOption ${soldOut ? "soldOut" : ""}`} key={variant.id}><input type="radio" name={`variant-${product.id}`} value={variant.id} disabled={soldOut} checked={selectedVariants[product.id] === variant.id} onChange={() => setSelectedVariants({ ...selectedVariants, [product.id]: variant.id })} /><span><strong>{variant.name}</strong><b>{formatPrice(variant.price)}</b><small>{soldOut ? "已售完" : inventoryLabel(variant.inventory)}</small></span></label>;
-                })}</fieldset>
+                {productVariants.length > 0 && <div className="variantSelector">
+                  <label htmlFor={`variant-${product.id}`}>選擇規格</label>
+                  <select id={`variant-${product.id}`} value={selectedVariants[product.id] || ""} onChange={(event) => setSelectedVariants({ ...selectedVariants, [product.id]: event.target.value })}>
+                    <option value="" disabled>請選擇規格</option>
+                    {productVariants.map((variant) => <option value={variant.id} key={variant.id} disabled={variant.inventory <= 0 || product.status !== "available"}>{variant.name}</option>)}
+                  </select>
+                  {selectedVariant && <div className="variantDetails">
+                    <div><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
+                    <div><span>庫存</span><strong>{selectedVariant.inventory > 0 ? `剩餘${selectedVariant.inventory}份` : "已售完"}</strong></div>
+                  </div>}
+                </div>}
                 <button disabled={product.status !== "available" || productVariants.every((variant) => variant.inventory <= 0)} onClick={() => addToCart(product)}>加入購物車</button>
               </div>
             </article>;
