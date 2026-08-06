@@ -39,14 +39,34 @@ export default function HomePage() {
   const [cartActionStatuses, setCartActionStatuses] = useState<Record<string, CartActionStatus>>({});
   const [productFeedback, setProductFeedback] = useState<Record<string, string>>({});
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [cartToast, setCartToast] = useState("");
+  const [cartBounceKey, setCartBounceKey] = useState(0);
+  const [animatedCartQuantity, setAnimatedCartQuantity] = useState("");
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ customer_name: "", phone: "", line_id: "", fulfillment: "到店取貨", processing: "不處理", note: "" });
   const feedbackTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const cartActionLocks = useRef(new Set<string>());
+  const cartToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
     Object.values(feedbackTimers.current).forEach(clearTimeout);
+    if (cartToastTimer.current) clearTimeout(cartToastTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [drawerOpen]);
 
   useEffect(() => {
     async function loadCatalog() {
@@ -177,10 +197,15 @@ export default function HomePage() {
         return [...items, { product_id: product.id, product_name: product.name, variant_id: variant.id, variant_name: variant.name, price: variant.price, quantity }];
       });
       setCartActionStatuses((current) => ({ ...current, [product.id]: "success" }));
-      showProductFeedback(product.id, `${variant.name} × ${quantity} 已加入購物車，購物車內共 ${quantityAlreadyInCart + quantity} 隻`, () => {
+      const successMessage = `${variant.name} × ${quantity} 已加入購物車，購物車內共 ${quantityAlreadyInCart + quantity} 隻`;
+      showProductFeedback(product.id, successMessage, () => {
         cartActionLocks.current.delete(product.id);
         setCartActionStatuses((current) => ({ ...current, [product.id]: "idle" }));
       });
+      if (cartToastTimer.current) clearTimeout(cartToastTimer.current);
+      setCartToast(successMessage);
+      setCartBounceKey((current) => current + 1);
+      cartToastTimer.current = setTimeout(() => setCartToast(""), 1800);
     } catch (error) {
       cartActionLocks.current.delete(product.id);
       setCartActionStatuses((current) => ({ ...current, [product.id]: "error" }));
@@ -204,6 +229,7 @@ export default function HomePage() {
       return;
     }
     setCart((items) => items.map((item) => item.variant_id === variantId ? { ...item, quantity } : item));
+    setAnimatedCartQuantity(`${variantId}-${quantity}`);
   }
 
   async function submit(event: React.FormEvent) {
@@ -246,10 +272,19 @@ export default function HomePage() {
   }
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const shippingThreshold = 2500;
+  const shippingRemaining = Math.max(0, shippingThreshold - total);
+  const shippingProgress = Math.min(100, (total / shippingThreshold) * 100);
+
+  function goToCheckout() {
+    setDrawerOpen(false);
+    window.setTimeout(() => document.getElementById("order")?.scrollIntoView({ behavior: "smooth" }), 220);
+  }
 
   return (
     <main>
-      <header className="hero"><nav><strong>漢久海鮮</strong><div><Link href="/admin">後台管理</Link><a href="#order">查看購物車</a></div></nav><section><p>每日嚴選，新鮮直送</p><h1>今天，吃好魚。</h1><p>挑選想要的商品與規格，送出訂單後由我們與你確認取貨細節。</p></section></header>
+      <header className="hero"><nav><strong>漢久海鮮</strong><div><Link href="/admin">後台管理</Link><button className="headerCartButton" type="button" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><span className={cartBounceKey ? "cartIcon cartIconBounce" : "cartIcon"} key={cartBounceKey} aria-hidden="true">🛒</span> {totalQuantity} | {total.toLocaleString("zh-TW")}</button></div></nav><section><p>每日嚴選，新鮮直送</p><h1>今天，吃好魚。</h1><p>挑選想要的商品與規格，送出訂單後由我們與你確認取貨細節。</p></section></header>
       <section className="content">
         <div className="heading"><div><small>TODAY&apos;S CATCH</small><h2>今日海鮮</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
         <div className="grid">
@@ -307,13 +342,32 @@ export default function HomePage() {
           })}
         </div>
       </section>
-      <section id="order" className="order">
-        <div className="panel"><h2>你的購物車</h2>{cart.length === 0 ? <p>尚未選購商品。</p> : cart.map((item) => {
-          const variant = variants.find((candidate) => candidate.id === item.variant_id);
-          const purchaseLimit = variant ? getPurchaseLimit(variant) : item.quantity;
-          const cartBusy = cartActionStatuses[item.product_id] === "adding";
-          return <div className="cartRow" key={item.variant_id}><div><strong>{item.product_name}</strong><small>{item.variant_name} · {formatPrice(item.price)}</small></div><div className="quantity"><button type="button" aria-label={`減少 ${item.variant_name} 數量`} disabled={cartBusy} onClick={() => changeQuantity(item.variant_id, item.quantity - 1)}>−</button><span>{item.quantity}</span><button type="button" aria-label={`增加 ${item.variant_name} 數量`} disabled={cartBusy || !variant || item.quantity >= purchaseLimit} onClick={() => changeQuantity(item.variant_id, item.quantity + 1)}>＋</button></div></div>;
-        })}<div className="cartTotal"><strong>合計</strong><strong>{formatPrice(total)}</strong></div></div>
+      <div className={`cartDrawerLayer ${drawerOpen ? "isOpen" : ""}`} aria-hidden={!drawerOpen} onClick={() => setDrawerOpen(false)}>
+        <aside className="cartDrawer" role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title" onClick={(event) => event.stopPropagation()}>
+          <header className="cartDrawerHeader"><div><small>YOUR CATCH</small><h2 id="cart-drawer-title">購物車</h2></div><button type="button" aria-label="關閉購物車" onClick={() => setDrawerOpen(false)}>×</button></header>
+          <div className="cartDrawerBody">
+            {cart.length === 0 ? <div className="cartEmpty"><strong>🐟 購物車還沒有商品</strong><p>今天去挑幾尾漂亮的魚吧！</p></div> : cart.map((item) => {
+              const variant = variants.find((candidate) => candidate.id === item.variant_id);
+              const product = products.find((candidate) => candidate.id === item.product_id);
+              const purchaseLimit = variant ? getPurchaseLimit(variant) : item.quantity;
+              const cartBusy = cartActionStatuses[item.product_id] === "adding";
+              return <article className="drawerCartItem" key={item.variant_id}>
+                <div className="drawerItemImage">{product?.image_url ? <img src={product.image_url} alt={item.product_name} /> : <span>🐟</span>}</div>
+                <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className="priceTag">{item.price.toLocaleString("zh-TW")}</span><strong className="itemSubtotal">小計 {(item.price * item.quantity).toLocaleString("zh-TW")}</strong></div>
+                <div className="drawerItemActions"><div className="quantity"><button type="button" aria-label={`減少 ${item.variant_name} 數量`} disabled={cartBusy} onClick={() => changeQuantity(item.variant_id, item.quantity - 1)}>−</button><span className={animatedCartQuantity === `${item.variant_id}-${item.quantity}` ? "cartQuantityPulse" : ""} key={`${item.variant_id}-${item.quantity}`}>{item.quantity}</span><button type="button" aria-label={`增加 ${item.variant_name} 數量`} disabled={cartBusy || !variant || item.quantity >= purchaseLimit} onClick={() => changeQuantity(item.variant_id, item.quantity + 1)}>＋</button></div><button className="removeCartItem" type="button" aria-label={`移除${item.product_name} ${item.variant_name}`} disabled={cartBusy} onClick={() => changeQuantity(item.variant_id, 0)}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>
+              </article>;
+            })}
+          </div>
+          <footer className="cartDrawerFooter">
+            <div className="shippingProgress" aria-live="polite">{shippingRemaining > 0 ? <><p>🚚 再買 <strong>{shippingRemaining.toLocaleString("zh-TW")}</strong> 即可享台北配送</p><div className="progressTrack" role="progressbar" aria-label="台北配送資格進度" aria-valuemin={0} aria-valuemax={shippingThreshold} aria-valuenow={total}><span style={{ width: `${shippingProgress}%` }} /></div></> : <p className="shippingQualified">🎉 已符合台北配送資格</p>}</div>
+            <div className="drawerSubtotal"><span>購物車小計</span><strong>{total.toLocaleString("zh-TW")}</strong></div>
+            <button className="checkoutButton" type="button" disabled={cart.length === 0} onClick={goToCheckout}>立即結帳</button>
+            <button className="continueShoppingButton" type="button" onClick={() => setDrawerOpen(false)}>← 繼續挑魚</button>
+          </footer>
+        </aside>
+      </div>
+      {cartToast && <div className="cartToast" role="status" aria-live="polite">✓ {cartToast}</div>}
+      <section id="order" className="order checkoutSection">
         <form className="panel" onSubmit={submit}><h2>聯絡資料</h2><label>姓名<input required value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} /></label><label>電話<input required value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label><label>LINE ID<input value={form.line_id} onChange={(e) => setForm({ ...form, line_id: e.target.value })} /></label><label>取貨方式<select value={form.fulfillment} onChange={(e) => setForm({ ...form, fulfillment: e.target.value })}><option>到店取貨</option><option>冷藏宅配</option><option>面交</option></select></label><label>處理方式<select value={form.processing} onChange={(e) => setForm({ ...form, processing: e.target.value })}><option>不處理</option><option>去鱗去內臟</option><option>切片</option></select></label><label>備註<textarea rows={4} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label><button>送出訂單</button>{notice && <p className="notice">{notice}</p>}</form>
       </section>
     </main>
