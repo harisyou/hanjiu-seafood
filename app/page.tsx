@@ -38,6 +38,10 @@ const deliveryMethods: Array<{ value: DeliveryMethod; icon: string; detail: stri
   { value: "7-ELEVEN 冷凍交貨便", icon: "🏪", detail: "韓九補貼一半運費", recommendation: "超商取貨" }
 ];
 
+function displayDeliveryMethod(method: DeliveryMethod) {
+  return method === "7-ELEVEN 冷凍交貨便" ? "7-11 冷凍交貨便" : method;
+}
+
 function getPurchaseLimit(variant: ProductVariant) {
   return variant.inventory;
 }
@@ -69,6 +73,7 @@ export default function HomePage() {
   const [form, setForm] = useState<CheckoutForm>({ customer_name: "", phone: "", fulfillment: "永春市場自取", address: "", pickupDate: "", pickupTime: "", preferredStoreName: "", preferredStoreCode: "", note: "", rememberCustomerData: true });
   const [savedProfile, setSavedProfile] = useState<CheckoutForm | null>(null);
   const [editingCheckout, setEditingCheckout] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const feedbackTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const cartActionLocks = useRef(new Set<string>());
   const cartToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -291,28 +296,46 @@ export default function HomePage() {
     if (form.fulfillment === "永春市場自取" && !form.pickupDate) return "請選擇取貨日期";
     if (form.fulfillment === "永春市場自取" && !form.pickupTime) return "請選擇取貨時間";
     if ((form.fulfillment === "台北市配送" || form.fulfillment === "冷凍宅配") && !form.address.trim()) return "請填寫配送地址";
-    if (form.fulfillment === "7-ELEVEN 冷凍交貨便" && !form.preferredStoreName.trim()) return "請填寫 7-ELEVEN 門市名稱";
+    if (form.fulfillment === "7-ELEVEN 冷凍交貨便" && !form.preferredStoreName.trim()) return "請填寫 7-11 門市名稱";
     if (form.fulfillment === "台北市配送" && total < 2500) return `再買 ${shippingRemaining.toLocaleString("zh-TW")} 即可享台北市配送`;
     return "";
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (cart.length === 0) return setNotice("請先選購商品");
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setNotice("");
+    if (cart.length === 0) {
+      setNotice("請先選購商品");
+      setIsSubmitting(false);
+      return;
+    }
     const validationMessage = validateCheckout();
-    if (validationMessage) return setNotice(validationMessage);
+    if (validationMessage) {
+      setNotice(validationMessage);
+      setIsSubmitting(false);
+      return;
+    }
+    try {
     const variantIds = [...new Set(cart.map((item) => item.variant_id))];
     const { data: latestVariants, error: variantError } = await supabase
       .from("product_variants")
       .select("id,name,inventory,active")
       .in("id", variantIds);
-    if (variantError) return setNotice(`無法確認最新供應數量：${variantError.message}`);
+    if (variantError) {
+      console.error("Checkout stock validation failed", variantError);
+      setNotice("訂單送出失敗，請稍後再試，或透過 LINE 與韓九聯繫。");
+      setIsSubmitting(false);
+      return;
+    }
 
     for (const item of cart) {
       const latestVariant = latestVariants?.find((variant) => variant.id === item.variant_id);
       const latestLimit = latestVariant?.active ? latestVariant.inventory : 0;
       if (!latestVariant || item.quantity > latestLimit) {
         setNotice(`此規格目前最多可購買 ${latestLimit} 隻，請調整購物車數量。`);
+        setIsSubmitting(false);
         return;
       }
     }
@@ -325,19 +348,19 @@ export default function HomePage() {
       form.preferredStoreCode && `店號：${form.preferredStoreCode}`,
       form.note && `備註：${form.note}`
     ].filter(Boolean).join("\n");
-    const { data: order, error } = await supabase.from("orders").insert({ customer_name: form.customer_name, phone: form.phone, line_id: null, fulfillment: form.fulfillment, processing: "不處理", note: deliveryDetails || null, status: "new" }).select("id").single();
-    if (error || !order) return setNotice(`訂單送出失敗：${error?.message || "無法建立訂單"}`);
-
-    const { error: itemError } = await supabase.from("order_items").insert(cart.map((item) => ({
-      order_id: order.id,
-      product_id: item.product_id,
-      product_name: item.product_name,
-      variant_id: item.variant_id,
-      variant_name: item.variant_name,
-      price: item.price,
-      quantity: item.quantity
-    })));
-    if (itemError) return setNotice(`訂單品項儲存失敗：${itemError.message}`);
+    const { data: orderId, error } = await supabase.rpc("create_checkout_order", {
+      p_customer_name: form.customer_name,
+      p_phone: form.phone,
+      p_fulfillment: form.fulfillment,
+      p_note: deliveryDetails || null,
+      p_items: cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity }))
+    });
+    if (error || !orderId) {
+      console.error("Atomic checkout RPC failed", error);
+      setNotice("訂單送出失敗，請稍後再試，或透過 LINE 與韓九聯繫。");
+      setIsSubmitting(false);
+      return;
+    }
 
     if (form.rememberCustomerData) {
       window.localStorage.setItem(CHECKOUT_PROFILE_KEY, JSON.stringify(form));
@@ -346,10 +369,17 @@ export default function HomePage() {
       window.localStorage.removeItem(CHECKOUT_PROFILE_KEY);
       setSavedProfile(null);
     }
-    const text = ["海鮮訂購單", `姓名：${form.customer_name}`, `電話：${form.phone}`, "", ...cart.map((item) => `${item.product_name}｜${item.variant_name}｜${formatPrice(item.price)} × ${item.quantity}`), "", `配送方式：${form.fulfillment}`, deliveryDetails].filter(Boolean).join("\n");
+    const text = ["海鮮訂購單", `姓名：${form.customer_name}`, `電話：${form.phone}`, "", ...cart.map((item) => `${item.product_name}｜${item.variant_name}｜${formatPrice(item.price)} × ${item.quantity}`), "", `配送方式：${displayDeliveryMethod(form.fulfillment)}`, deliveryDetails].filter(Boolean).join("\n");
     try { await navigator.clipboard.writeText(text); } catch { /* Clipboard permission is optional. */ }
-    setCart([]); setNotice("訂單已送出，內容也已複製，可前往 LINE 聯絡我們。");
+    setCart([]);
+    setNotice("訂單已送出");
+    setIsSubmitting(false);
     window.open("https://lin.ee/q4avfUZ", "_blank", "noopener,noreferrer");
+    } catch (error) {
+      console.error("Unexpected checkout failure", error);
+      setNotice("訂單送出失敗，請稍後再試，或透過 LINE 與韓九聯繫。");
+      setIsSubmitting(false);
+    }
   }
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -458,7 +488,7 @@ export default function HomePage() {
           <header className="checkoutHeading"><small>SMART CHECKOUT</small><h2>確認配送與聯絡資料</h2><p>不需登入，選好配送方式即可完成訂購。</p></header>
           {savedProfile && <section className="returningCustomer" aria-labelledby="returning-title">
             <div><span aria-hidden="true">👋</span><div><h3 id="returning-title">歡迎回來{savedProfile.customer_name ? `，${savedProfile.customer_name}` : ""}</h3>{maskedPhone && <p>{maskedPhone}</p>}</div></div>
-            <dl><div><dt>常用方式</dt><dd>{savedProfile.fulfillment}</dd></div>{maskedAddress && <div><dt>常用地址</dt><dd>{maskedAddress}</dd></div>}</dl>
+            <dl><div><dt>常用方式</dt><dd>{displayDeliveryMethod(savedProfile.fulfillment)}</dd></div>{maskedAddress && <div><dt>常用地址</dt><dd>{maskedAddress}</dd></div>}</dl>
             <div className="returningActions"><button type="button" onClick={useSavedCheckoutProfile}>使用這份資料</button><button type="button" className="secondary" onClick={() => { setForm({ ...savedProfile, rememberCustomerData: true }); setEditingCheckout(true); }}>修改資料</button></div>
           </section>}
           {editingCheckout && <form className="checkoutForm" onSubmit={submit} noValidate>
@@ -466,12 +496,12 @@ export default function HomePage() {
               const unavailable = method.value === "台北市配送" && total < shippingThreshold;
               const selected = form.fulfillment === method.value;
               return <label className={`deliveryOption ${selected ? "isSelected" : ""} ${unavailable ? "isDisabled" : ""}`} key={method.value}>
-                <input type="radio" name="delivery" value={method.value} aria-label={method.value} checked={selected} disabled={unavailable} onChange={() => setForm((current) => ({ ...current, fulfillment: method.value }))} />
-                <span className="deliveryIcon" aria-hidden="true">{method.icon}</span><span className="deliveryCopy"><span className="deliveryTitle"><strong>{method.value}</strong><small className="recommendationLabel">{method.recommendation}</small></span><small className="deliverySubtitle">{method.value === "台北市配送" ? unavailable ? <>🚚 再買 <b>{shippingRemaining.toLocaleString("zh-TW")}</b> 即可享台北市配送</> : "已符合台北市配送資格" : method.detail}</small></span><span className="deliveryCheck" aria-hidden="true">{selected ? "✓" : ""}</span>
+                <input type="radio" name="delivery" value={method.value} aria-label={displayDeliveryMethod(method.value)} checked={selected} disabled={unavailable} onChange={() => setForm((current) => ({ ...current, fulfillment: method.value }))} />
+                <span className="deliveryIcon" aria-hidden="true">{method.icon}</span><span className="deliveryCopy"><span className="deliveryTitle"><strong>{displayDeliveryMethod(method.value)}</strong><small className="recommendationLabel">{method.recommendation}</small></span><small className="deliverySubtitle">{method.value === "台北市配送" ? unavailable ? <>🚚 再買 <b>{shippingRemaining.toLocaleString("zh-TW")}</b> 即可享台北市配送</> : "已符合台北市配送資格" : method.detail}</small></span><span className="deliveryCheck" aria-hidden="true">{selected ? "✓" : ""}</span>
               </label>;
             })}</div>
               <div className="subsidyMessage" aria-live="polite">{(form.fulfillment === "冷凍宅配" || form.fulfillment === "7-ELEVEN 冷凍交貨便") && "💚 韓九已補貼一半運費，讓您享有更優惠的配送服務。"}</div>
-              <details className="deliveryExplanation"><summary>配送說明</summary><div className="deliveryExplanationBody"><div><strong>📍 永春市場自取</strong><p>請依約定時間至永春市場取貨。</p></div><div><strong>🚚 台北市配送</strong><p>單筆消費滿 2500，即可協助配送到府。</p></div><div><strong>❄️ 冷凍宅配</strong><p>韓九補貼一半運費。</p></div><div><strong>🏪 7-ELEVEN 冷凍交貨便</strong><p>韓九補貼一半運費，實際寄送仍依商品及數量安排。</p></div></div></details>
+              <details className="deliveryExplanation"><summary>配送須知</summary><div className="deliveryExplanationBody"><div><strong>📍 永春市場自取</strong><p>請依約定時間至永春市場取貨。</p></div><div><strong>🚚 台北市配送</strong><p>單筆消費滿 2500，即可協助配送到府。</p></div><div><strong>❄️ 冷凍宅配</strong><p>韓九補貼一半運費。</p></div><div><strong>🏪 7-11 冷凍交貨便</strong><p>韓九補貼一半運費，實際寄送仍依商品及數量安排。</p></div></div></details>
             </fieldset>
             <div className="checkoutFields"><label>姓名<input autoComplete="name" value={form.customer_name} onChange={(event) => setForm({ ...form, customer_name: event.target.value })} /></label><label>電話<input type="tel" inputMode="tel" autoComplete="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
               {form.fulfillment === "永春市場自取" && <><label>取貨日期<input type="date" value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>取貨時間<input type="time" value={form.pickupTime} onChange={(event) => setForm({ ...form, pickupTime: event.target.value })} /></label></>}
@@ -479,7 +509,7 @@ export default function HomePage() {
               {form.fulfillment === "7-ELEVEN 冷凍交貨便" && <><label>門市名稱<input value={form.preferredStoreName} onChange={(event) => setForm({ ...form, preferredStoreName: event.target.value })} /></label><label>門市店號（選填）<input inputMode="numeric" value={form.preferredStoreCode} onChange={(event) => setForm({ ...form, preferredStoreCode: event.target.value })} /></label></>}
               <label className="fullField">備註（選填）<textarea rows={3} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} /></label></div>
             <label className="rememberCustomer"><input type="checkbox" checked={form.rememberCustomerData} onChange={(event) => updateRememberPreference(event.target.checked)} /><span><strong>記住我的資料，下次自動帶入</strong><small>資料只會儲存在這台裝置，不會建立會員帳號。</small></span></label>
-            <button className="submitOrderButton" type="submit">確認並送出訂單</button><div className="checkoutNotice" aria-live="polite">{notice && <p className="notice">{notice}</p>}</div>
+            <button className="submitOrderButton" type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>{isSubmitting ? "送出中…" : "送出訂單"}</button><div className="checkoutNotice" aria-live="polite">{notice && <p className="notice">{notice}</p>}</div>
           </form>}
         </div>
       </section>
