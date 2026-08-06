@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { formatPrice, Product, ProductVariant } from "@/lib/catalog";
+import { formatPrice, inventoryLabel, Product, ProductVariant } from "@/lib/catalog";
 
 type CartItem = {
   product_id: string;
@@ -19,6 +19,7 @@ export default function HomePage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
+  const [selectedQuantities, setSelectedQuantities] = useState<Record<string, number>>({});
   const [cart, setCart] = useState<CartItem[]>([]);
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ customer_name: "", phone: "", line_id: "", fulfillment: "到店取貨", processing: "不處理", note: "" });
@@ -38,14 +39,38 @@ export default function HomePage() {
   }, [supabase]);
 
   useEffect(() => {
+    const automaticSelections: Record<string, string> = {};
+
+    products.forEach((product) => {
+      const availableVariants = variants.filter((variant) =>
+        variant.product_id === product.id &&
+        variant.inventory > 0 &&
+        product.status === "available"
+      );
+      if (availableVariants.length === 1) automaticSelections[product.id] = availableVariants[0].id;
+    });
+
     setSelectedVariants((current) => {
       const next = { ...current };
       let changed = false;
 
-      products.forEach((product) => {
-        const productVariants = variants.filter((variant) => variant.product_id === product.id);
-        if (productVariants.length === 1 && !next[product.id]) {
-          next[product.id] = productVariants[0].id;
+      Object.entries(automaticSelections).forEach(([productId, variantId]) => {
+        if (!next[productId]) {
+          next[productId] = variantId;
+          changed = true;
+        }
+      });
+
+      return changed ? next : current;
+    });
+
+    setSelectedQuantities((current) => {
+      const next = { ...current };
+      let changed = false;
+
+      Object.keys(automaticSelections).forEach((productId) => {
+        if (!next[productId]) {
+          next[productId] = 1;
           changed = true;
         }
       });
@@ -54,16 +79,27 @@ export default function HomePage() {
     });
   }, [products, variants]);
 
+  function selectVariant(productId: string, variantId: string) {
+    setSelectedVariants((current) => ({ ...current, [productId]: variantId }));
+    setSelectedQuantities((current) => ({ ...current, [productId]: 1 }));
+  }
+
+  function setProductQuantity(productId: string, inventory: number, quantity: number) {
+    const nextQuantity = Math.min(inventory, Math.max(1, quantity));
+    setSelectedQuantities((current) => ({ ...current, [productId]: nextQuantity }));
+  }
+
   function addToCart(product: Product) {
     const variantId = selectedVariants[product.id];
     const variant = variants.find((item) => item.id === variantId && item.product_id === product.id);
     if (!variant) return setNotice(`請先選擇「${product.name}」的規格。`);
     if (product.status !== "available" || variant.inventory <= 0) return setNotice("此規格目前已售完。");
+    const quantity = Math.min(variant.inventory, Math.max(1, selectedQuantities[product.id] || 1));
 
     setCart((items) => {
       const found = items.find((item) => item.variant_id === variant.id);
-      if (found) return items.map((item) => item.variant_id === variant.id ? { ...item, quantity: item.quantity + 1 } : item);
-      return [...items, { product_id: product.id, product_name: product.name, variant_id: variant.id, variant_name: variant.name, price: variant.price, quantity: 1 }];
+      if (found) return items.map((item) => item.variant_id === variant.id ? { ...item, quantity: item.quantity + quantity } : item);
+      return [...items, { product_id: product.id, product_name: product.name, variant_id: variant.id, variant_name: variant.name, price: variant.price, quantity }];
     });
     setNotice(`${product.name}（${variant.name}）已加入購物車。`);
   }
@@ -107,21 +143,36 @@ export default function HomePage() {
           {products.map((product) => {
             const productVariants = variants.filter((variant) => variant.product_id === product.id);
             const selectedVariant = productVariants.find((variant) => variant.id === selectedVariants[product.id]);
+            const selectedQuantity = selectedQuantities[product.id] || 1;
+            const selectedVariantSoldOut = Boolean(selectedVariant && (selectedVariant.inventory <= 0 || product.status !== "available"));
             return <article className="card" key={product.id}>
               <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span>🦀</span>}{product.featured && <b>本日精選</b>}</div>
               <div className="body"><small>{product.status === "available" ? "今日供應" : "已售完"}</small><h3>{product.name}</h3><p>{product.description}</p><p>料理建議：{product.cooking || "歡迎詢問"}</p>
                 {productVariants.length > 0 && <div className="variantSelector">
                   <label htmlFor={`variant-${product.id}`}>選擇規格</label>
-                  <select id={`variant-${product.id}`} value={selectedVariants[product.id] || ""} onChange={(event) => setSelectedVariants({ ...selectedVariants, [product.id]: event.target.value })}>
+                  <select id={`variant-${product.id}`} value={selectedVariants[product.id] || ""} onChange={(event) => selectVariant(product.id, event.target.value)}>
                     <option value="" disabled>請選擇規格</option>
-                    {productVariants.map((variant) => <option value={variant.id} key={variant.id} disabled={variant.inventory <= 0 || product.status !== "available"}>{variant.name}</option>)}
+                    {productVariants.map((variant) => {
+                      const soldOut = variant.inventory <= 0 || product.status !== "available";
+                      return <option value={variant.id} key={variant.id} disabled={soldOut}>{variant.name}｜{formatPrice(variant.price)}{soldOut ? "｜已售完" : ""}</option>;
+                    })}
                   </select>
-                  {selectedVariant && <div className="variantDetails">
-                    <div><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
-                    <div><span>庫存</span><strong>{selectedVariant.inventory > 0 ? `剩餘${selectedVariant.inventory}份` : "已售完"}</strong></div>
-                  </div>}
+                  {selectedVariant && <>
+                    <div className="variantDetails">
+                      <div><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
+                      <div><span>庫存</span><strong>{inventoryLabel(selectedVariant.inventory)}</strong></div>
+                    </div>
+                    {selectedVariant.inventory > 0 && <div className="variantQuantity">
+                      <span>數量</span>
+                      <div>
+                        <button type="button" aria-label="減少數量" disabled={selectedQuantity <= 1} onClick={() => setProductQuantity(product.id, selectedVariant.inventory, selectedQuantity - 1)}>−</button>
+                        <strong>{selectedQuantity}</strong>
+                        <button type="button" aria-label="增加數量" disabled={selectedQuantity >= selectedVariant.inventory} onClick={() => setProductQuantity(product.id, selectedVariant.inventory, selectedQuantity + 1)}>＋</button>
+                      </div>
+                    </div>}
+                  </>}
                 </div>}
-                <button disabled={product.status !== "available" || productVariants.every((variant) => variant.inventory <= 0)} onClick={() => addToCart(product)}>加入購物車</button>
+                <button disabled={!selectedVariant || selectedVariantSoldOut} onClick={() => addToCart(product)}>{!selectedVariant ? "請先選擇規格" : selectedVariantSoldOut ? "此規格已售完" : "加入購物車"}</button>
               </div>
             </article>;
           })}
