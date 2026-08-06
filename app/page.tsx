@@ -220,7 +220,7 @@ export default function HomePage() {
       const latestVariant = latestVariants?.find((variant) => variant.id === item.variant_id);
       const latestLimit = latestVariant?.active ? latestVariant.inventory : 0;
       if (!latestVariant || item.quantity > latestLimit) {
-        setNotice(`${item.variant_name}目前最多只剩 ${latestLimit} 隻，請調整購物車數量。`);
+        setNotice(`此規格目前最多可購買 ${latestLimit} 隻，請調整購物車數量。`);
         return;
       }
     }
@@ -298,7 +298,10 @@ export default function HomePage() {
                   </>}
                 </div>}
                 <button className={`addToCartButton ${cartActionStatus === "success" ? "isSuccess" : ""} ${cartActionStatus === "error" ? "isError" : ""}`} disabled={soldOut || !selectedVariant || cartLimitReached || cartActionStatus === "adding" || cartActionStatus === "success"} aria-busy={cartActionStatus === "adding"} onClick={() => addToCart(product)}>{addButtonText}</button>
-                <div className={`productFeedback ${cartActionStatus === "success" ? "isSuccess" : ""} ${cartActionStatus === "error" ? "isError" : ""}`} aria-live="polite" aria-atomic="true">{productFeedback[product.id] || (cartLimitReached ? "已達本次限購上限" : "")}</div>
+                <div className={`productFeedback ${cartActionStatus === "success" ? "isSuccess" : ""} ${cartActionStatus === "error" ? "isError" : ""}`} aria-live="polite" aria-atomic="true">
+                  {productFeedback[product.id] && <span>{productFeedback[product.id]}</span>}
+                  {cartLimitReached && <span className="limitFeedback">購物車內已達此規格的購買上限</span>}
+                </div>
               </div>
             </article>;
           })}
