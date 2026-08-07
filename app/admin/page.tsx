@@ -156,7 +156,7 @@ export default function AdminPage() {
 
   return (
     <main className="admin">
-      <header className="adminTop"><div><Link href="/">← 返回商店</Link><h1>海鮮商品後台</h1><nav className="adminNavigation" aria-label="後台功能"><Link href="/admin/orders">🛒 今日訂單</Link></nav><p>{user}</p></div><button onClick={() => supabase.auth.signOut().then(() => setUser(""))}>登出</button></header>
+      <header className="adminTop"><div><Link href="/">← 返回商店</Link><h1>海鮮商品後台</h1><nav className="adminNavigation" aria-label="後台功能"><Link href="/admin/orders">🛒 今日訂單</Link><Link href="/admin/requests">🔔 想找的魚</Link></nav><p>{user}</p></div><button onClick={() => supabase.auth.signOut().then(() => setUser(""))}>登出</button></header>
       <section className="adminGrid">
         <form className="panel" onSubmit={save}>
           <h2>{editingId ? "編輯商品" : "新增商品"}</h2>
