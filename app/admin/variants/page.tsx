@@ -88,11 +88,11 @@ export default function ProductVariantsPage() {
   }
 
   async function removeVariant(variant: ProductVariant) {
-    if (!confirm(`確定刪除規格「${variant.name}」？`)) return;
-    const { error } = await supabase.from("product_variants").delete().eq("id", variant.id);
-    if (error) setNotice(`刪除失敗：${error.message}`);
+    if (!confirm(`確定下架規格「${variant.name}」？歷史訂單資料不會受影響。`)) return;
+    const { error } = await supabase.from("product_variants").update({ active: false }).eq("id", variant.id);
+    if (error) setNotice(`下架失敗：${error.message}`);
     else {
-      setNotice("規格已刪除。");
+      setNotice("規格已下架。");
       await loadProduct(productId);
     }
   }
@@ -132,7 +132,7 @@ export default function ProductVariantsPage() {
                 </div>
                 <div className="manageActions">
                   <button type="button" onClick={() => editVariant(variant)}>編輯</button>
-                  <button type="button" onClick={() => removeVariant(variant)}>刪除</button>
+                  <button type="button" onClick={() => removeVariant(variant)}>下架</button>
                 </div>
               </div>
             ))}
