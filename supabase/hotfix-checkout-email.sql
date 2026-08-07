@@ -37,6 +37,7 @@ begin
   if nullif(btrim(p_customer_name), '') is null then raise exception 'customer_name_required'; end if;
   if nullif(btrim(p_phone), '') is null then raise exception 'phone_required'; end if;
   if v_email is not null and length(v_email) > 254 then raise exception 'invalid_email'; end if;
+  -- The escaped dot requires a literal dot between the domain labels.
   if v_email is not null and v_email !~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then
     raise exception 'invalid_email';
   end if;
@@ -144,6 +145,7 @@ $$;
 
 revoke all on function public.create_checkout_order(text, text, text, text, jsonb, text) from public;
 revoke all on function public.create_checkout_order(text, text, text, text, jsonb) from public;
+revoke insert on table public.orders from anon, authenticated;
+revoke insert on table public.order_items from anon, authenticated;
 grant execute on function public.create_checkout_order(text, text, text, text, jsonb, text) to anon, authenticated;
 grant execute on function public.create_checkout_order(text, text, text, text, jsonb) to anon, authenticated;
-
