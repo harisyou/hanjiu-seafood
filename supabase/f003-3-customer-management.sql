@@ -147,6 +147,7 @@ declare
   v_email text := nullif(btrim(coalesce(p_email, '')), '');
 begin
   if nullif(btrim(p_customer_name), '') is null then raise exception 'customer_name_required'; end if;
+  if nullif(btrim(p_phone), '') is null then raise exception 'phone_required'; end if;
   if v_phone !~ '^09[0-9]{8}$' then raise exception 'invalid_phone'; end if;
   if v_email is not null and length(v_email) > 254 then raise exception 'invalid_email'; end if;
   if v_email is not null and v_email !~* '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$' then raise exception 'invalid_email'; end if;
@@ -243,11 +244,15 @@ declare
   v_email text := nullif(left(btrim(coalesce(p_email, '')), 254), '');
 begin
   if nullif(btrim(p_customer_name), '') is null then raise exception 'customer_name_required'; end if;
-  if v_phone !~ '^09[0-9]{8}$' then raise exception 'invalid_phone'; end if;
+  if nullif(btrim(p_phone), '') is null then raise exception 'phone_required'; end if;
   if nullif(btrim(p_fish_name), '') is null then raise exception 'fish_name_required'; end if;
   if nullif(btrim(p_quantity_request), '') is null then raise exception 'quantity_required'; end if;
   if p_wanted_by is not null and p_wanted_by < current_date then raise exception 'wanted_by_in_past'; end if;
-  if length(btrim(p_customer_name)) > 100 or length(btrim(p_fish_name)) > 100 or length(btrim(p_quantity_request)) > 100 then raise exception 'invalid_length'; end if;
+  if length(btrim(p_customer_name)) > 100 or length(btrim(p_phone)) > 40
+    or length(btrim(p_fish_name)) > 100 or length(btrim(p_quantity_request)) > 100 then
+    raise exception 'invalid_length';
+  end if;
+  if v_phone !~ '^09[0-9]{8}$' then raise exception 'invalid_phone'; end if;
   if v_email is not null and v_email !~* '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$' then raise exception 'invalid_email'; end if;
   if p_purpose is not null and p_purpose not in ('家庭料理', '聚餐', '送禮', '餐廳', '其他') then raise exception 'invalid_purpose'; end if;
   if p_preferred_notification_channel not in ('line', 'email', 'phone') then raise exception 'invalid_notification_channel'; end if;
