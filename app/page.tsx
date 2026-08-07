@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { formatPrice, ProcessingOption, ProcessingPreset, ProcessingPresetOption, Product, ProductProcessingOption, ProductProcessingPreset, ProductVariant } from "@/lib/catalog";
+import FishRequestForm from "./fish-request-form";
 
 type CartItem = {
   cart_key: string;
@@ -614,6 +615,12 @@ export default function HomePage() {
               </div>
             </article>;
           })}
+        </div>
+      </section>
+      <section id="fish-request" className="fishRequestSection">
+        <div className="fishRequestShell">
+          <header className="fishRequestHeading"><small>FISH WISHLIST</small><h2>🔔 想找的魚</h2><p>今天沒有看到想要的魚？<br />可以先告訴我，之後有看到我再通知你。</p><a className="fishRequestAnchor" href="#fish-request-form">告訴韓九我想找什麼</a></header>
+          <div id="fish-request-form"><FishRequestForm /></div>
         </div>
       </section>
       <div className={`cartDrawerLayer ${drawerOpen ? "isOpen" : ""}`} aria-hidden={!drawerOpen} onClick={() => setDrawerOpen(false)}>
