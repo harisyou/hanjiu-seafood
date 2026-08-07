@@ -17,6 +17,7 @@ export type AdminOrderItem = {
 
 export type AdminOrder = {
   id: string;
+  customer_id?: string | null;
   customer_name: string;
   phone: string;
   email?: string | null;
