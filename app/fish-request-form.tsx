@@ -36,7 +36,7 @@ export default function FishRequestForm() {
     setSubmitting(false);
     if (error || !data) {
       console.error("Fish request submission failed", error);
-      setMessage("需求送出失敗，請稍後再試。\n也可以直接透過 LINE 與韓九聯絡。");
+      setMessage(error?.message.includes("wanted_by_in_past") ? "希望日期不能早於今天" : "需求送出失敗，請稍後再試。\n也可以直接透過 LINE 與韓九聯絡。");
       return;
     }
     setSuccess(true); setForm(initialForm);

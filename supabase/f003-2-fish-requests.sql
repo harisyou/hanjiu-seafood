@@ -103,6 +103,9 @@ begin
   if nullif(btrim(p_phone), '') is null then raise exception 'phone_required'; end if;
   if nullif(btrim(p_fish_name), '') is null then raise exception 'fish_name_required'; end if;
   if nullif(btrim(p_quantity_request), '') is null then raise exception 'quantity_required'; end if;
+  if p_wanted_by is not null and p_wanted_by < current_date then
+    raise exception 'wanted_by_in_past';
+  end if;
   if length(btrim(p_customer_name)) > 100 or length(btrim(p_phone)) > 40
     or length(btrim(p_fish_name)) > 100 or length(btrim(p_quantity_request)) > 100 then
     raise exception 'invalid_length';

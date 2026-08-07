@@ -34,7 +34,7 @@ export function fishRequestStatusLabel(status: FishRequestStatus) {
 }
 
 export function notificationLabel(request: FishRequest) {
-  if (request.preferred_notification_channel === "line") return request.line_user_id ? "LINE（可通知）" : "LINE（尚未綁定）";
+  if (request.preferred_notification_channel === "line") return request.line_user_id ? "偏好 LINE｜可通知" : "偏好 LINE｜尚未綁定";
   if (request.preferred_notification_channel === "email") return "Email";
   return "簡訊／電話";
 }
