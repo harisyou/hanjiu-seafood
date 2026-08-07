@@ -45,7 +45,7 @@ export default function AdminOrdersPage() {
   const filteredOrders = useMemo(() => {
     const keyword = search.trim().toLocaleLowerCase("zh-TW");
     const next = orders.filter((order) => {
-      const matchesSearch = !keyword || [order.customer_name, order.phone, order.id, ...order.order_items.map((item) => item.product_name)].some((value) => value?.toLocaleLowerCase("zh-TW").includes(keyword));
+      const matchesSearch = !keyword || [order.customer_name, order.phone, order.email, order.id, ...order.order_items.map((item) => item.product_name)].some((value) => value?.toLocaleLowerCase("zh-TW").includes(keyword));
       const normalizedStatus = orderStatusLabel(order.status);
       const matchesStatus = !statusFilter || normalizedStatus === statusFilter;
       return matchesSearch && matchesStatus && (!deliveryFilter || order.fulfillment === deliveryFilter) && (!paymentFilter || order.payment_status === paymentFilter);
@@ -68,7 +68,7 @@ export default function AdminOrdersPage() {
     <header className="adminTop ordersTop"><div><Link href="/admin">← 商品後台</Link><h1>🛒 今日訂單</h1><p>{user}</p></div><button type="button" onClick={() => supabase.auth.signOut().then(() => setUser(null))}>登出</button></header>
     <section className="todaySummary" aria-label="今日訂單摘要">{summary.map(([label, count]) => <div key={label}><span>{label}</span><strong>{count}</strong></div>)}</section>
     <section className="orderTools panel">
-      <label className="orderSearch">搜尋訂單<input type="search" placeholder="姓名、電話、訂單編號或商品" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+      <label className="orderSearch">搜尋訂單<input type="search" placeholder="姓名、電話、Email、訂單編號或商品" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
       <div className="orderFilterGrid"><label>訂單狀態<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">全部</option>{orderStatusOptions.map((option) => <option value={option.label} key={option.value}>{option.label}</option>)}</select></label><label>配送方式<select value={deliveryFilter} onChange={(event) => setDeliveryFilter(event.target.value)}><option value="">全部配送方式</option>{deliveryOptions.map((option) => <option value={option} key={option}>{option === "7-ELEVEN 冷凍交貨便" ? "7-11 冷凍交貨便" : option}</option>)}</select></label><label>付款狀態<select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)}><option value="">全部付款狀態</option><option value="unpaid">未付款</option><option value="paid">已付款</option></select></label><label>排序<select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">建立時間（新到舊）</option><option value="delivery">配送方式</option><option value="status">訂單狀態</option></select></label></div>
     </section>
     {notice && <p className="notice centeredNotice">{notice}</p>}
@@ -84,4 +84,3 @@ export default function AdminOrdersPage() {
     })}</section>
   </main>;
 }
-

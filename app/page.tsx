@@ -552,7 +552,8 @@ export default function HomePage() {
       p_phone: normalizedPhone,
       p_fulfillment: form.fulfillment,
       p_note: deliveryDetails || null,
-      p_items: cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity, processing_preset_id: item.processing_preset_id, processing_option_ids: item.processing_option_ids, processing_note: item.processing_note }))
+      p_items: cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity, processing_preset_id: item.processing_preset_id, processing_option_ids: item.processing_option_ids, processing_note: item.processing_note })),
+      p_email: normalizedForm.email || null
     });
     if (error || !orderId) {
       console.error("Atomic checkout RPC failed", error);
