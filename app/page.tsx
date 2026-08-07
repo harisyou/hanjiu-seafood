@@ -3,16 +3,24 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { formatPrice, Product, ProductVariant } from "@/lib/catalog";
+import { formatPrice, ProcessingOption, ProcessingPreset, ProcessingPresetOption, Product, ProductProcessingOption, ProductProcessingPreset, ProductVariant } from "@/lib/catalog";
 
 type CartItem = {
+  cart_key: string;
   product_id: string;
   product_name: string;
   variant_id: string;
   variant_name: string;
   price: number;
   quantity: number;
+  processing_preset_id: string | null;
+  processing_preset_name: string;
+  processing_option_ids: string[];
+  processing_option_names: string[];
+  processing_note: string;
 };
+
+type ProcessingSelection = { presetId: string | null; optionIds: string[]; note: string };
 
 type CartActionStatus = "idle" | "adding" | "success" | "error";
 type DeliveryMethod = "永春市場自取" | "台北市配送" | "冷凍宅配" | "7-ELEVEN 冷凍交貨便";
@@ -56,10 +64,21 @@ function getRemainingPurchasable(variant: ProductVariant, cart: CartItem[]) {
   return Math.max(0, getPurchaseLimit(variant) - getCartQuantityForVariant(cart, variant.id));
 }
 
+function processingSignature(variantId: string, selection: ProcessingSelection) {
+  return [variantId, selection.presetId || "custom", [...selection.optionIds].sort().join(","), selection.note.trim()].join("::");
+}
+
 export default function HomePage() {
   const supabase = useMemo(() => createClient(), []);
   const [products, setProducts] = useState<Product[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
+  const [processingOptions, setProcessingOptions] = useState<ProcessingOption[]>([]);
+  const [processingPresets, setProcessingPresets] = useState<ProcessingPreset[]>([]);
+  const [processingPresetOptions, setProcessingPresetOptions] = useState<ProcessingPresetOption[]>([]);
+  const [productProcessingOptions, setProductProcessingOptions] = useState<ProductProcessingOption[]>([]);
+  const [productProcessingPresets, setProductProcessingPresets] = useState<ProductProcessingPreset[]>([]);
+  const [productProcessing, setProductProcessing] = useState<Record<string, ProcessingSelection>>({});
+  const [customProcessingOpen, setCustomProcessingOpen] = useState<Record<string, boolean>>({});
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, number>>({});
   const [cartActionStatuses, setCartActionStatuses] = useState<Record<string, CartActionStatus>>({});
@@ -74,6 +93,7 @@ export default function HomePage() {
   const [savedProfile, setSavedProfile] = useState<CheckoutForm | null>(null);
   const [editingCheckout, setEditingCheckout] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deliveryNotesOpen, setDeliveryNotesOpen] = useState(false);
   const feedbackTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const cartActionLocks = useRef(new Set<string>());
   const cartToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -113,14 +133,28 @@ export default function HomePage() {
 
   useEffect(() => {
     async function loadCatalog() {
-      const [productResult, variantResult] = await Promise.all([
+      const [productResult, variantResult, optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult] = await Promise.all([
         supabase.from("products").select("*").neq("status", "hidden").order("sort_order"),
-        supabase.from("product_variants").select("*").eq("active", true).order("sort_order")
+        supabase.from("product_variants").select("*").eq("active", true).order("sort_order"),
+        supabase.from("processing_options").select("*").eq("active", true).order("sort_order"),
+        supabase.from("processing_presets").select("*").eq("active", true).order("sort_order"),
+        supabase.from("processing_preset_options").select("*"),
+        supabase.from("product_processing_options").select("*").eq("active", true).order("sort_order"),
+        supabase.from("product_processing_presets").select("*").eq("active", true).order("sort_order")
       ]);
       if (productResult.error) setNotice(`商品載入失敗：${productResult.error.message}`);
       else setProducts((productResult.data || []) as Product[]);
       if (variantResult.error) setNotice(`規格載入失敗：${variantResult.error.message}`);
       else setVariants((variantResult.data || []) as ProductVariant[]);
+      const processingError = [optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult].find((result) => result.error)?.error;
+      if (processingError) setNotice("魚貨處理方式載入失敗，請重新整理頁面。");
+      else {
+        setProcessingOptions((optionResult.data || []) as ProcessingOption[]);
+        setProcessingPresets((presetResult.data || []) as ProcessingPreset[]);
+        setProcessingPresetOptions((presetOptionResult.data || []) as ProcessingPresetOption[]);
+        setProductProcessingOptions((productOptionResult.data || []) as ProductProcessingOption[]);
+        setProductProcessingPresets((productPresetResult.data || []) as ProductProcessingPreset[]);
+      }
     }
     loadCatalog();
   }, [supabase]);
@@ -165,6 +199,34 @@ export default function HomePage() {
       return changed ? next : current;
     });
   }, [products, variants]);
+
+  useEffect(() => {
+    setProductProcessing((current) => {
+      const next = { ...current };
+      let changed = false;
+      products.forEach((product) => {
+        if (next[product.id]) return;
+        const availablePresets = productProcessingPresets.filter((item) => item.product_id === product.id);
+        const availableOptions = productProcessingOptions.filter((item) => item.product_id === product.id);
+        const defaultConfig = availablePresets.find((item) => item.is_default) || (availablePresets.length === 1 && availableOptions.length === 0 ? availablePresets[0] : null);
+        if (!product.processing_enabled) {
+          next[product.id] = { presetId: "none", optionIds: [], note: "" };
+          changed = true;
+        } else if (defaultConfig) {
+          const allowedIds = new Set(availableOptions.map((item) => item.processing_option_id));
+          next[product.id] = { presetId: defaultConfig.preset_id, optionIds: processingPresetOptions.filter((item) => item.preset_id === defaultConfig.preset_id && allowedIds.has(item.processing_option_id)).map((item) => item.processing_option_id).sort(), note: "" };
+          changed = true;
+        } else if (availableOptions.length === 1 && availablePresets.length === 0) {
+          next[product.id] = { presetId: null, optionIds: [availableOptions[0].processing_option_id], note: "" };
+          changed = true;
+        } else {
+          next[product.id] = { presetId: null, optionIds: [], note: "" };
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, [processingPresetOptions, productProcessingOptions, productProcessingPresets, products]);
 
   useEffect(() => {
     setSelectedQuantities((current) => {
@@ -232,12 +294,16 @@ export default function HomePage() {
       if (quantity > remainingPurchasable) {
         throw new Error(`購物車內已有 ${quantityAlreadyInCart} 隻，本次最多還可加入 ${remainingPurchasable} 隻`);
       }
+      const processingSelection = product.processing_enabled ? (productProcessing[product.id] || { presetId: null, optionIds: [], note: "" }) : { presetId: "none", optionIds: [], note: "" };
+      if (product.processing_enabled && !processingSelection.presetId && processingSelection.optionIds.length === 0) throw new Error("請選擇魚貨處理方式");
+      const processing = processingDisplay(product.id, processingSelection);
+      const cartKey = processingSignature(variant.id, processingSelection);
 
       await new Promise((resolve) => setTimeout(resolve, 120));
       setCart((items) => {
-        const found = items.find((item) => item.variant_id === variant.id);
-        if (found) return items.map((item) => item.variant_id === variant.id ? { ...item, quantity: item.quantity + quantity } : item);
-        return [...items, { product_id: product.id, product_name: product.name, variant_id: variant.id, variant_name: variant.name, price: variant.price, quantity }];
+        const found = items.find((item) => item.cart_key === cartKey);
+        if (found) return items.map((item) => item.cart_key === cartKey ? { ...item, quantity: item.quantity + quantity } : item);
+        return [...items, { cart_key: cartKey, product_id: product.id, product_name: product.name, variant_id: variant.id, variant_name: variant.name, price: variant.price, quantity, processing_preset_id: processingSelection.presetId, processing_preset_name: processing.presetName, processing_option_ids: processingSelection.optionIds, processing_option_names: processing.optionNames, processing_note: processingSelection.note.trim() }];
       });
       setCartActionStatuses((current) => ({ ...current, [product.id]: "success" }));
       const successMessage = `${variant.name} × ${quantity} 已加入購物車，購物車內共 ${quantityAlreadyInCart + quantity} 隻`;
@@ -258,12 +324,15 @@ export default function HomePage() {
     }
   }
 
-  function changeQuantity(variantId: string, quantity: number) {
+  function changeQuantity(cartKey: string, quantity: number) {
     if (quantity <= 0) {
-      setCart((items) => items.filter((item) => item.variant_id !== variantId));
+      setCart((items) => items.filter((item) => item.cart_key !== cartKey));
       return;
     }
 
+    const cartItem = cart.find((item) => item.cart_key === cartKey);
+    if (!cartItem) return;
+    const variantId = cartItem.variant_id;
     const variant = variants.find((item) => item.id === variantId);
     if (!variant) return setNotice("無法確認此規格的限購數量，請重新整理頁面。");
     const purchaseLimit = getPurchaseLimit(variant);
@@ -271,8 +340,86 @@ export default function HomePage() {
       setNotice(`${variant.name}本次最多可購買 ${purchaseLimit} 隻。`);
       return;
     }
-    setCart((items) => items.map((item) => item.variant_id === variantId ? { ...item, quantity } : item));
+    const otherVariantQuantity = cart.filter((item) => item.variant_id === variantId && item.cart_key !== cartKey).reduce((sum, item) => sum + item.quantity, 0);
+    if (otherVariantQuantity + quantity > purchaseLimit) {
+      setNotice(`${variant.name}本次最多可購買 ${purchaseLimit} 隻。`);
+      return;
+    }
+    setCart((items) => items.map((item) => item.cart_key === cartKey ? { ...item, quantity } : item));
     setAnimatedCartQuantity(`${variantId}-${quantity}`);
+  }
+
+  function updateCartProcessing(cartKey: string, selection: ProcessingSelection) {
+    setCart((items) => {
+      const source = items.find((item) => item.cart_key === cartKey);
+      if (!source) return items;
+      const display = processingDisplay(source.product_id, selection);
+      const nextKey = processingSignature(source.variant_id, selection);
+      const updated = { ...source, cart_key: nextKey, processing_preset_id: selection.presetId, processing_preset_name: display.presetName, processing_option_ids: selection.optionIds, processing_option_names: display.optionNames, processing_note: selection.note.trim() };
+      const duplicate = items.find((item) => item.cart_key === nextKey && item.cart_key !== cartKey);
+      if (duplicate) return items.filter((item) => item.cart_key !== cartKey && item.cart_key !== nextKey).concat({ ...duplicate, quantity: duplicate.quantity + source.quantity });
+      return items.map((item) => item.cart_key === cartKey ? updated : item);
+    });
+  }
+
+  function selectCartPreset(item: CartItem, presetId: string) {
+    updateCartProcessing(item.cart_key, { presetId, optionIds: presetOptionIds(presetId, item.product_id), note: item.processing_note });
+  }
+
+  function toggleCartOption(item: CartItem, optionId: string) {
+    const optionIds = item.processing_option_ids.includes(optionId) ? item.processing_option_ids.filter((id) => id !== optionId) : [...item.processing_option_ids, optionId].sort();
+    updateCartProcessing(item.cart_key, { presetId: item.processing_preset_id, optionIds, note: item.processing_note });
+  }
+
+  function presetOptionIds(presetId: string, productId: string) {
+    const allowed = new Set(productProcessingOptions.filter((item) => item.product_id === productId).map((item) => item.processing_option_id));
+    return processingPresetOptions.filter((item) => item.preset_id === presetId && allowed.has(item.processing_option_id)).map((item) => item.processing_option_id).sort();
+  }
+
+  function processingDisplay(productId: string, selection: ProcessingSelection) {
+    if (!products.find((product) => product.id === productId)?.processing_enabled) return { presetName: "不處理", optionNames: [] as string[] };
+    const preset = selection.presetId ? processingPresets.find((item) => item.id === selection.presetId) : null;
+    const exactPreset = preset && JSON.stringify(presetOptionIds(preset.id, productId)) === JSON.stringify([...selection.optionIds].sort());
+    return {
+      presetName: exactPreset ? preset.name : selection.optionIds.length ? "客製化處理" : "不處理",
+      optionNames: selection.optionIds.map((id) => processingOptions.find((item) => item.id === id)?.name).filter((name): name is string => Boolean(name))
+    };
+  }
+
+  function summarizedProcessing(item: CartItem) {
+    const preset = item.processing_preset_id ? processingPresets.find((candidate) => candidate.id === item.processing_preset_id) : null;
+    const includedIds = preset ? processingPresetOptions.filter((candidate) => candidate.preset_id === preset.id).map((candidate) => candidate.processing_option_id) : [];
+    const containsPreset = includedIds.every((id) => item.processing_option_ids.includes(id));
+    const extraIds = preset && containsPreset ? item.processing_option_ids.filter((id) => !includedIds.includes(id)) : item.processing_option_ids;
+    return {
+      name: preset && containsPreset ? preset.name : item.processing_preset_name,
+      extras: extraIds.map((id) => processingOptions.find((option) => option.id === id)?.name).filter((name): name is string => Boolean(name))
+    };
+  }
+
+  function summarizedSelection(productId: string, selection: ProcessingSelection) {
+    const preset = selection.presetId ? processingPresets.find((candidate) => candidate.id === selection.presetId) : null;
+    const includedIds = preset ? presetOptionIds(preset.id, productId) : [];
+    const containsPreset = includedIds.every((id) => selection.optionIds.includes(id));
+    const extraIds = preset && containsPreset ? selection.optionIds.filter((id) => !includedIds.includes(id)) : selection.optionIds;
+    const fallback = processingDisplay(productId, selection);
+    return {
+      presetName: preset && containsPreset ? preset.name : fallback.presetName,
+      optionNames: extraIds.map((id) => processingOptions.find((option) => option.id === id)?.name).filter((name): name is string => Boolean(name))
+    };
+  }
+
+  function selectProcessingPreset(productId: string, presetId: string) {
+    setProductProcessing((current) => ({ ...current, [productId]: { ...(current[productId] || { note: "" }), presetId, optionIds: presetOptionIds(presetId, productId) } }));
+    setCustomProcessingOpen((current) => ({ ...current, [productId]: false }));
+  }
+
+  function toggleProcessingOption(productId: string, optionId: string) {
+    setProductProcessing((current) => {
+      const selection = current[productId] || { presetId: null, optionIds: [], note: "" };
+      const optionIds = selection.optionIds.includes(optionId) ? selection.optionIds.filter((id) => id !== optionId) : [...selection.optionIds, optionId];
+      return { ...current, [productId]: { ...selection, optionIds: optionIds.sort() } };
+    });
   }
 
   function useSavedCheckoutProfile() {
@@ -353,11 +500,11 @@ export default function HomePage() {
       p_phone: form.phone,
       p_fulfillment: form.fulfillment,
       p_note: deliveryDetails || null,
-      p_items: cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity }))
+      p_items: cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity, processing_preset_id: item.processing_preset_id, processing_option_ids: item.processing_option_ids, processing_note: item.processing_note }))
     });
     if (error || !orderId) {
       console.error("Atomic checkout RPC failed", error);
-      setNotice("訂單送出失敗，請稍後再試，或透過 LINE 與韓九聯繫。");
+      setNotice(error?.message.includes("processing_updated") ? "此商品的處理方式已更新，請重新確認。" : "訂單送出失敗，請稍後再試，或透過 LINE 與韓九聯繫。");
       setIsSubmitting(false);
       return;
     }
@@ -369,7 +516,7 @@ export default function HomePage() {
       window.localStorage.removeItem(CHECKOUT_PROFILE_KEY);
       setSavedProfile(null);
     }
-    const text = ["海鮮訂購單", `姓名：${form.customer_name}`, `電話：${form.phone}`, "", ...cart.map((item) => `${item.product_name}｜${item.variant_name}｜${formatPrice(item.price)} × ${item.quantity}`), "", `配送方式：${displayDeliveryMethod(form.fulfillment)}`, deliveryDetails].filter(Boolean).join("\n");
+    const text = ["海鮮訂購單", `姓名：${form.customer_name}`, `電話：${form.phone}`, "", ...cart.map((item) => { const processing = summarizedProcessing(item); return `${item.product_name}｜${item.variant_name}｜${formatPrice(item.price)} × ${item.quantity}\n處理：${processing.name}${processing.extras.map((name) => `\n＋${name}`).join("")}${item.processing_note ? `\n備註：${item.processing_note}` : ""}`; }), "", `配送方式：${displayDeliveryMethod(form.fulfillment)}`, deliveryDetails].filter(Boolean).join("\n");
     try { await navigator.clipboard.writeText(text); } catch { /* Clipboard permission is optional. */ }
     setCart([]);
     setNotice("訂單已送出");
@@ -413,6 +560,10 @@ export default function HomePage() {
             const soldOut = purchasableVariants.length === 0;
             const cartLimitReached = Boolean(selectedVariant && remainingPurchasable <= 0);
             const cartActionStatus = cartActionStatuses[product.id] || "idle";
+            const availableProcessingOptions = productProcessingOptions.filter((item) => item.product_id === product.id).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
+            const availableProcessingPresets = productProcessingPresets.filter((item) => item.product_id === product.id).map((config) => ({ config, preset: processingPresets.find((preset) => preset.id === config.preset_id) })).filter((item): item is { config: ProductProcessingPreset; preset: ProcessingPreset } => Boolean(item.preset));
+            const processingSelection = productProcessing[product.id] || { presetId: null, optionIds: [], note: "" };
+            const processingSelectionDisplay = summarizedSelection(product.id, processingSelection);
             const addButtonText = soldOut
               ? "已售完"
               : !selectedVariant
@@ -438,6 +589,13 @@ export default function HomePage() {
                       <div><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
                       <div><span>本次還可購買</span><strong>{remainingPurchasable} 隻</strong>{remainingPurchasable === 1 && <small className="rareNotice">🔥 最後一份</small>}</div>
                     </div>
+                    {product.processing_enabled && <section className="productProcessing" aria-labelledby={`processing-${product.id}`}>
+                      <h4 id={`processing-${product.id}`}>🐟 魚貨處理方式</h4>
+                      {availableProcessingPresets.length > 0 && <div className="processingPresetCards" role="radiogroup" aria-label={`${product.name}處理套餐`}>{availableProcessingPresets.map(({ preset }) => <label className={`processingPresetCard ${processingSelection.presetId === preset.id && !customProcessingOpen[product.id] ? "isSelected" : ""}`} key={preset.id}><input type="radio" name={`processing-${product.id}`} checked={processingSelection.presetId === preset.id && !customProcessingOpen[product.id]} onChange={() => selectProcessingPreset(product.id, preset.id)} /><span><strong>{preset.name}{preset.id === "three-clean" && <small>韓九推薦</small>}</strong>{preset.id === "three-clean" && <span className="processingSocialProof">最多人選</span>}<span className="processingHelper">{preset.id === "none" ? <>💡 保留完整魚身，回家自行處理。</> : preset.id === "three-clean" ? <>✓ 適合大部分家庭料理<br />✓ 去魚鱗、去內臟、去魚鰓</> : preset.id === "three-remove" ? <>🍳 適合紅燒、清蒸或直接下鍋。<br />🐟 去頭、去尾、去內臟。</> : preset.description}</span></span></label>)}{availableProcessingOptions.length > 0 && <label className={`processingPresetCard customProcessingChoice ${customProcessingOpen[product.id] ? "isSelected" : ""}`}><input type="radio" name={`processing-${product.id}`} checked={Boolean(customProcessingOpen[product.id])} aria-expanded={Boolean(customProcessingOpen[product.id])} aria-controls={`custom-processing-${product.id}`} onChange={() => setCustomProcessingOpen((current) => ({ ...current, [product.id]: true }))} /><span><strong>我要自己選處理方式</strong><span className="processingHelper">依照料理需求自由複選。</span></span></label>}</div>}
+                      {availableProcessingOptions.length > 0 && <div className={`processingCustomReveal ${customProcessingOpen[product.id] ? "isOpen" : ""}`} id={`custom-processing-${product.id}`} aria-hidden={!customProcessingOpen[product.id]}><fieldset className="processingCustom" disabled={!customProcessingOpen[product.id]}><legend>客製化處理（可複選）</legend><div>{availableProcessingOptions.map((option) => <label key={option.id}><input type="checkbox" checked={processingSelection.optionIds.includes(option.id)} onChange={() => toggleProcessingOption(product.id, option.id)} /><span>{option.name}</span></label>)}</div></fieldset></div>}
+                      <label className="processingNote">其他處理需求（選填）<textarea rows={3} placeholder={"例如：\n保留魚頭煮湯\n保留魚卵\n不要切太小\n魚皮保留"} value={processingSelection.note} onChange={(event) => setProductProcessing((current) => ({ ...current, [product.id]: { ...processingSelection, note: event.target.value } }))} /></label>
+                      <p className="processingSelectionStatus" aria-live="polite">目前選擇：{processingSelectionDisplay.presetName}{processingSelectionDisplay.optionNames.map((name) => <span key={name}><br />＋{name}</span>)}</p>
+                    </section>}
                     <div className="variantQuantity">
                       <span>數量</span>
                       <div>
@@ -466,11 +624,16 @@ export default function HomePage() {
               const variant = variants.find((candidate) => candidate.id === item.variant_id);
               const product = products.find((candidate) => candidate.id === item.product_id);
               const purchaseLimit = variant ? getPurchaseLimit(variant) : item.quantity;
+              const totalVariantQuantity = getCartQuantityForVariant(cart, item.variant_id);
               const cartBusy = cartActionStatuses[item.product_id] === "adding";
-              return <article className="drawerCartItem" key={item.variant_id}>
+              const cartPresets = productProcessingPresets.filter((config) => config.product_id === item.product_id).map((config) => processingPresets.find((preset) => preset.id === config.preset_id)).filter((preset): preset is ProcessingPreset => Boolean(preset));
+              const cartOptions = productProcessingOptions.filter((config) => config.product_id === item.product_id).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
+              const processingSummary = summarizedProcessing(item);
+              return <article className="drawerCartItem" key={item.cart_key}>
                 <div className="drawerItemImage">{product?.image_url ? <img src={product.image_url} alt={item.product_name} /> : <span>🐟</span>}</div>
-                <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className="priceTag">{item.price.toLocaleString("zh-TW")}</span><strong className="itemSubtotal">小計 {(item.price * item.quantity).toLocaleString("zh-TW")}</strong></div>
-                <div className="drawerItemActions"><div className="quantity"><button type="button" aria-label={`減少 ${item.variant_name} 數量`} disabled={cartBusy} onClick={() => changeQuantity(item.variant_id, item.quantity - 1)}>−</button><span className={animatedCartQuantity === `${item.variant_id}-${item.quantity}` ? "cartQuantityPulse" : ""} key={`${item.variant_id}-${item.quantity}`}>{item.quantity}</span><button type="button" aria-label={`增加 ${item.variant_name} 數量`} disabled={cartBusy || !variant || item.quantity >= purchaseLimit} onClick={() => changeQuantity(item.variant_id, item.quantity + 1)}>＋</button></div><button className="removeCartItem" type="button" aria-label={`移除${item.product_name} ${item.variant_name}`} disabled={cartBusy} onClick={() => changeQuantity(item.variant_id, 0)}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>
+                <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className="priceTag">{item.price.toLocaleString("zh-TW")}</span><div className="cartProcessingSummary"><strong>處理：{processingSummary.name}</strong>{processingSummary.extras.map((name) => <span key={name}>＋{name}</span>)}{item.processing_note && <span>其他需求：{item.processing_note}</span>}</div><strong className="itemSubtotal">小計 {(item.price * item.quantity).toLocaleString("zh-TW")}</strong></div>
+                {product?.processing_enabled && <details className="cartProcessingEditor"><summary>編輯處理方式</summary><div><div className="cartProcessingPresets">{cartPresets.map((preset) => <button type="button" className={item.processing_preset_id === preset.id ? "isSelected" : ""} onClick={() => selectCartPreset(item, preset.id)} key={preset.id}>{preset.name}</button>)}</div><div className="cartProcessingOptions">{cartOptions.map((option) => <label key={option.id}><input type="checkbox" checked={item.processing_option_ids.includes(option.id)} onChange={() => toggleCartOption(item, option.id)} />{option.name}</label>)}</div><label>其他處理需求<textarea rows={2} defaultValue={item.processing_note} onBlur={(event) => updateCartProcessing(item.cart_key, { presetId: item.processing_preset_id, optionIds: item.processing_option_ids, note: event.target.value })} /></label></div></details>}
+                <div className="drawerItemActions"><div className="quantity"><button type="button" aria-label={`減少 ${item.variant_name} 數量`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, item.quantity - 1)}>−</button><span className={animatedCartQuantity === `${item.variant_id}-${item.quantity}` ? "cartQuantityPulse" : ""} key={`${item.variant_id}-${item.quantity}`}>{item.quantity}</span><button type="button" aria-label={`增加 ${item.variant_name} 數量`} disabled={cartBusy || !variant || totalVariantQuantity >= purchaseLimit} onClick={() => changeQuantity(item.cart_key, item.quantity + 1)}>＋</button></div><button className="removeCartItem" type="button" aria-label={`移除${item.product_name} ${item.variant_name}`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, 0)}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>
               </article>;
             })}
           </div>
@@ -492,6 +655,7 @@ export default function HomePage() {
             <div className="returningActions"><button type="button" onClick={useSavedCheckoutProfile}>使用這份資料</button><button type="button" className="secondary" onClick={() => { setForm({ ...savedProfile, rememberCustomerData: true }); setEditingCheckout(true); }}>修改資料</button></div>
           </section>}
           {editingCheckout && <form className="checkoutForm" onSubmit={submit} noValidate>
+            <section className="checkoutItemReview" aria-labelledby="checkout-items-title"><h3 id="checkout-items-title">訂購內容</h3>{cart.map((item) => { const processing = summarizedProcessing(item); return <article key={item.cart_key}><strong>{item.product_name}｜{item.variant_name}｜×{item.quantity}</strong><span>處理：{processing.name}</span>{processing.extras.map((name) => <span key={name}>＋{name}</span>)}{item.processing_note && <span>備註：{item.processing_note}</span>}</article>; })}</section>
             <fieldset className="deliveryFieldset"><legend>選擇配送方式</legend><div className="deliveryOptions">{deliveryMethods.map((method) => {
               const unavailable = method.value === "台北市配送" && total < shippingThreshold;
               const selected = form.fulfillment === method.value;
@@ -501,7 +665,7 @@ export default function HomePage() {
               </label>;
             })}</div>
               <div className="subsidyMessage" aria-live="polite">{(form.fulfillment === "冷凍宅配" || form.fulfillment === "7-ELEVEN 冷凍交貨便") && "💚 韓九已補貼一半運費，讓您享有更優惠的配送服務。"}</div>
-              <details className="deliveryExplanation"><summary>配送須知</summary><div className="deliveryExplanationBody"><div><strong>📍 永春市場自取</strong><p>請依約定時間至永春市場取貨。</p></div><div><strong>🚚 台北市配送</strong><p>單筆消費滿 2500，即可協助配送到府。</p></div><div><strong>❄️ 冷凍宅配</strong><p>韓九補貼一半運費。</p></div><div><strong>🏪 7-11 冷凍交貨便</strong><p>韓九補貼一半運費，實際寄送仍依商品及數量安排。</p></div></div></details>
+              <details className="deliveryExplanation" onToggle={(event) => setDeliveryNotesOpen(event.currentTarget.open)}><summary aria-expanded={deliveryNotesOpen}>配送須知</summary><div className="deliveryExplanationBody"><div><strong>📍 永春市場自取</strong><p>請依約定時間至永春市場取貨。</p></div><div><strong>🚚 台北市配送</strong><p>單筆消費滿 2500，即可協助配送到府。</p></div><div><strong>❄️ 冷凍宅配</strong><p>韓九補貼一半運費。</p></div><div><strong>🏪 7-11 冷凍交貨便</strong><p>韓九補貼一半運費，實際寄送仍依商品及數量安排。</p></div></div></details>
             </fieldset>
             <div className="checkoutFields"><label>姓名<input autoComplete="name" value={form.customer_name} onChange={(event) => setForm({ ...form, customer_name: event.target.value })} /></label><label>電話<input type="tel" inputMode="tel" autoComplete="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
               {form.fulfillment === "永春市場自取" && <><label>取貨日期<input type="date" value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>取貨時間<input type="time" value={form.pickupTime} onChange={(event) => setForm({ ...form, pickupTime: event.target.value })} /></label></>}
