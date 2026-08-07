@@ -37,8 +37,8 @@ begin
   if nullif(btrim(p_customer_name), '') is null then raise exception 'customer_name_required'; end if;
   if nullif(btrim(p_phone), '') is null then raise exception 'phone_required'; end if;
   if v_email is not null and length(v_email) > 254 then raise exception 'invalid_email'; end if;
-  -- The escaped dot requires a literal dot between the domain labels.
-  if v_email is not null and v_email !~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then
+  -- The character class requires a literal dot between the domain labels.
+  if v_email is not null and v_email !~* '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$' then
     raise exception 'invalid_email';
   end if;
   if p_fulfillment not in ('永春市場自取', '台北市配送', '冷凍宅配', '7-ELEVEN 冷凍交貨便') then
