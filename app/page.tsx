@@ -93,6 +93,7 @@ export default function HomePage() {
   const [savedProfile, setSavedProfile] = useState<CheckoutForm | null>(null);
   const [editingCheckout, setEditingCheckout] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deliveryNotesOpen, setDeliveryNotesOpen] = useState(false);
   const feedbackTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const cartActionLocks = useRef(new Set<string>());
   const cartToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -385,6 +386,29 @@ export default function HomePage() {
     };
   }
 
+  function summarizedProcessing(item: CartItem) {
+    const preset = item.processing_preset_id ? processingPresets.find((candidate) => candidate.id === item.processing_preset_id) : null;
+    const includedIds = preset ? processingPresetOptions.filter((candidate) => candidate.preset_id === preset.id).map((candidate) => candidate.processing_option_id) : [];
+    const containsPreset = includedIds.every((id) => item.processing_option_ids.includes(id));
+    const extraIds = preset && containsPreset ? item.processing_option_ids.filter((id) => !includedIds.includes(id)) : item.processing_option_ids;
+    return {
+      name: preset && containsPreset ? preset.name : item.processing_preset_name,
+      extras: extraIds.map((id) => processingOptions.find((option) => option.id === id)?.name).filter((name): name is string => Boolean(name))
+    };
+  }
+
+  function summarizedSelection(productId: string, selection: ProcessingSelection) {
+    const preset = selection.presetId ? processingPresets.find((candidate) => candidate.id === selection.presetId) : null;
+    const includedIds = preset ? presetOptionIds(preset.id, productId) : [];
+    const containsPreset = includedIds.every((id) => selection.optionIds.includes(id));
+    const extraIds = preset && containsPreset ? selection.optionIds.filter((id) => !includedIds.includes(id)) : selection.optionIds;
+    const fallback = processingDisplay(productId, selection);
+    return {
+      presetName: preset && containsPreset ? preset.name : fallback.presetName,
+      optionNames: extraIds.map((id) => processingOptions.find((option) => option.id === id)?.name).filter((name): name is string => Boolean(name))
+    };
+  }
+
   function selectProcessingPreset(productId: string, presetId: string) {
     setProductProcessing((current) => ({ ...current, [productId]: { ...(current[productId] || { note: "" }), presetId, optionIds: presetOptionIds(presetId, productId) } }));
     setCustomProcessingOpen((current) => ({ ...current, [productId]: false }));
@@ -492,7 +516,7 @@ export default function HomePage() {
       window.localStorage.removeItem(CHECKOUT_PROFILE_KEY);
       setSavedProfile(null);
     }
-    const text = ["海鮮訂購單", `姓名：${form.customer_name}`, `電話：${form.phone}`, "", ...cart.map((item) => `${item.product_name}｜${item.variant_name}｜${formatPrice(item.price)} × ${item.quantity}\n處理：${item.processing_preset_name}${item.processing_option_names.length ? `（${item.processing_option_names.join("、")}）` : ""}${item.processing_note ? `\n備註：${item.processing_note}` : ""}`), "", `配送方式：${displayDeliveryMethod(form.fulfillment)}`, deliveryDetails].filter(Boolean).join("\n");
+    const text = ["海鮮訂購單", `姓名：${form.customer_name}`, `電話：${form.phone}`, "", ...cart.map((item) => { const processing = summarizedProcessing(item); return `${item.product_name}｜${item.variant_name}｜${formatPrice(item.price)} × ${item.quantity}\n處理：${processing.name}${processing.extras.map((name) => `\n＋${name}`).join("")}${item.processing_note ? `\n備註：${item.processing_note}` : ""}`; }), "", `配送方式：${displayDeliveryMethod(form.fulfillment)}`, deliveryDetails].filter(Boolean).join("\n");
     try { await navigator.clipboard.writeText(text); } catch { /* Clipboard permission is optional. */ }
     setCart([]);
     setNotice("訂單已送出");
@@ -539,7 +563,7 @@ export default function HomePage() {
             const availableProcessingOptions = productProcessingOptions.filter((item) => item.product_id === product.id).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
             const availableProcessingPresets = productProcessingPresets.filter((item) => item.product_id === product.id).map((config) => ({ config, preset: processingPresets.find((preset) => preset.id === config.preset_id) })).filter((item): item is { config: ProductProcessingPreset; preset: ProcessingPreset } => Boolean(item.preset));
             const processingSelection = productProcessing[product.id] || { presetId: null, optionIds: [], note: "" };
-            const processingSelectionDisplay = processingDisplay(product.id, processingSelection);
+            const processingSelectionDisplay = summarizedSelection(product.id, processingSelection);
             const addButtonText = soldOut
               ? "已售完"
               : !selectedVariant
@@ -570,7 +594,7 @@ export default function HomePage() {
                       {availableProcessingPresets.length > 0 && <div className="processingPresetCards" role="radiogroup" aria-label={`${product.name}處理套餐`}>{availableProcessingPresets.map(({ preset }) => <label className={`processingPresetCard ${processingSelection.presetId === preset.id && !customProcessingOpen[product.id] ? "isSelected" : ""}`} key={preset.id}><input type="radio" name={`processing-${product.id}`} checked={processingSelection.presetId === preset.id && !customProcessingOpen[product.id]} onChange={() => selectProcessingPreset(product.id, preset.id)} /><span><strong>{preset.name}{preset.id === "three-clean" && <small>韓九推薦</small>}</strong>{preset.id === "three-clean" && <span className="processingSocialProof">最多人選</span>}<span className="processingHelper">{preset.id === "none" ? <>💡 保留完整魚身，回家自行處理。</> : preset.id === "three-clean" ? <>✓ 適合大部分家庭料理<br />✓ 去魚鱗、去內臟、去魚鰓</> : preset.id === "three-remove" ? <>🍳 適合紅燒、清蒸或直接下鍋。<br />🐟 去頭、去尾、去內臟。</> : preset.description}</span></span></label>)}{availableProcessingOptions.length > 0 && <label className={`processingPresetCard customProcessingChoice ${customProcessingOpen[product.id] ? "isSelected" : ""}`}><input type="radio" name={`processing-${product.id}`} checked={Boolean(customProcessingOpen[product.id])} aria-expanded={Boolean(customProcessingOpen[product.id])} aria-controls={`custom-processing-${product.id}`} onChange={() => setCustomProcessingOpen((current) => ({ ...current, [product.id]: true }))} /><span><strong>我要自己選處理方式</strong><span className="processingHelper">依照料理需求自由複選。</span></span></label>}</div>}
                       {availableProcessingOptions.length > 0 && <div className={`processingCustomReveal ${customProcessingOpen[product.id] ? "isOpen" : ""}`} id={`custom-processing-${product.id}`} aria-hidden={!customProcessingOpen[product.id]}><fieldset className="processingCustom" disabled={!customProcessingOpen[product.id]}><legend>客製化處理（可複選）</legend><div>{availableProcessingOptions.map((option) => <label key={option.id}><input type="checkbox" checked={processingSelection.optionIds.includes(option.id)} onChange={() => toggleProcessingOption(product.id, option.id)} /><span>{option.name}</span></label>)}</div></fieldset></div>}
                       <label className="processingNote">其他處理需求（選填）<textarea rows={3} placeholder={"例如：\n保留魚頭煮湯\n保留魚卵\n不要切太小\n魚皮保留"} value={processingSelection.note} onChange={(event) => setProductProcessing((current) => ({ ...current, [product.id]: { ...processingSelection, note: event.target.value } }))} /></label>
-                      <p className="processingSelectionStatus" aria-live="polite">目前選擇：{processingSelectionDisplay.presetName}{processingSelectionDisplay.optionNames.length ? `｜${processingSelectionDisplay.optionNames.join("、")}` : ""}</p>
+                      <p className="processingSelectionStatus" aria-live="polite">目前選擇：{processingSelectionDisplay.presetName}{processingSelectionDisplay.optionNames.map((name) => <span key={name}><br />＋{name}</span>)}</p>
                     </section>}
                     <div className="variantQuantity">
                       <span>數量</span>
@@ -604,9 +628,10 @@ export default function HomePage() {
               const cartBusy = cartActionStatuses[item.product_id] === "adding";
               const cartPresets = productProcessingPresets.filter((config) => config.product_id === item.product_id).map((config) => processingPresets.find((preset) => preset.id === config.preset_id)).filter((preset): preset is ProcessingPreset => Boolean(preset));
               const cartOptions = productProcessingOptions.filter((config) => config.product_id === item.product_id).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
+              const processingSummary = summarizedProcessing(item);
               return <article className="drawerCartItem" key={item.cart_key}>
                 <div className="drawerItemImage">{product?.image_url ? <img src={product.image_url} alt={item.product_name} /> : <span>🐟</span>}</div>
-                <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className="priceTag">{item.price.toLocaleString("zh-TW")}</span><div className="cartProcessingSummary"><strong>處理：{item.processing_preset_name}</strong>{item.processing_option_names.length > 0 && <span>＋{item.processing_option_names.join("、")}</span>}{item.processing_note && <span>其他需求：{item.processing_note}</span>}</div><strong className="itemSubtotal">小計 {(item.price * item.quantity).toLocaleString("zh-TW")}</strong></div>
+                <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className="priceTag">{item.price.toLocaleString("zh-TW")}</span><div className="cartProcessingSummary"><strong>處理：{processingSummary.name}</strong>{processingSummary.extras.map((name) => <span key={name}>＋{name}</span>)}{item.processing_note && <span>其他需求：{item.processing_note}</span>}</div><strong className="itemSubtotal">小計 {(item.price * item.quantity).toLocaleString("zh-TW")}</strong></div>
                 {product?.processing_enabled && <details className="cartProcessingEditor"><summary>編輯處理方式</summary><div><div className="cartProcessingPresets">{cartPresets.map((preset) => <button type="button" className={item.processing_preset_id === preset.id ? "isSelected" : ""} onClick={() => selectCartPreset(item, preset.id)} key={preset.id}>{preset.name}</button>)}</div><div className="cartProcessingOptions">{cartOptions.map((option) => <label key={option.id}><input type="checkbox" checked={item.processing_option_ids.includes(option.id)} onChange={() => toggleCartOption(item, option.id)} />{option.name}</label>)}</div><label>其他處理需求<textarea rows={2} defaultValue={item.processing_note} onBlur={(event) => updateCartProcessing(item.cart_key, { presetId: item.processing_preset_id, optionIds: item.processing_option_ids, note: event.target.value })} /></label></div></details>}
                 <div className="drawerItemActions"><div className="quantity"><button type="button" aria-label={`減少 ${item.variant_name} 數量`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, item.quantity - 1)}>−</button><span className={animatedCartQuantity === `${item.variant_id}-${item.quantity}` ? "cartQuantityPulse" : ""} key={`${item.variant_id}-${item.quantity}`}>{item.quantity}</span><button type="button" aria-label={`增加 ${item.variant_name} 數量`} disabled={cartBusy || !variant || totalVariantQuantity >= purchaseLimit} onClick={() => changeQuantity(item.cart_key, item.quantity + 1)}>＋</button></div><button className="removeCartItem" type="button" aria-label={`移除${item.product_name} ${item.variant_name}`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, 0)}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>
               </article>;
@@ -630,7 +655,7 @@ export default function HomePage() {
             <div className="returningActions"><button type="button" onClick={useSavedCheckoutProfile}>使用這份資料</button><button type="button" className="secondary" onClick={() => { setForm({ ...savedProfile, rememberCustomerData: true }); setEditingCheckout(true); }}>修改資料</button></div>
           </section>}
           {editingCheckout && <form className="checkoutForm" onSubmit={submit} noValidate>
-            <section className="checkoutItemReview" aria-labelledby="checkout-items-title"><h3 id="checkout-items-title">訂購內容</h3>{cart.map((item) => <article key={item.cart_key}><strong>{item.product_name}｜{item.variant_name}｜×{item.quantity}</strong><span>處理：{item.processing_preset_name}{item.processing_option_names.length ? `、${item.processing_option_names.join("、")}` : ""}</span>{item.processing_note && <span>備註：{item.processing_note}</span>}</article>)}</section>
+            <section className="checkoutItemReview" aria-labelledby="checkout-items-title"><h3 id="checkout-items-title">訂購內容</h3>{cart.map((item) => { const processing = summarizedProcessing(item); return <article key={item.cart_key}><strong>{item.product_name}｜{item.variant_name}｜×{item.quantity}</strong><span>處理：{processing.name}</span>{processing.extras.map((name) => <span key={name}>＋{name}</span>)}{item.processing_note && <span>備註：{item.processing_note}</span>}</article>; })}</section>
             <fieldset className="deliveryFieldset"><legend>選擇配送方式</legend><div className="deliveryOptions">{deliveryMethods.map((method) => {
               const unavailable = method.value === "台北市配送" && total < shippingThreshold;
               const selected = form.fulfillment === method.value;
@@ -640,7 +665,7 @@ export default function HomePage() {
               </label>;
             })}</div>
               <div className="subsidyMessage" aria-live="polite">{(form.fulfillment === "冷凍宅配" || form.fulfillment === "7-ELEVEN 冷凍交貨便") && "💚 韓九已補貼一半運費，讓您享有更優惠的配送服務。"}</div>
-              <details className="deliveryExplanation"><summary>配送須知</summary><div className="deliveryExplanationBody"><div><strong>📍 永春市場自取</strong><p>請依約定時間至永春市場取貨。</p></div><div><strong>🚚 台北市配送</strong><p>單筆消費滿 2500，即可協助配送到府。</p></div><div><strong>❄️ 冷凍宅配</strong><p>韓九補貼一半運費。</p></div><div><strong>🏪 7-11 冷凍交貨便</strong><p>韓九補貼一半運費，實際寄送仍依商品及數量安排。</p></div></div></details>
+              <details className="deliveryExplanation" onToggle={(event) => setDeliveryNotesOpen(event.currentTarget.open)}><summary aria-expanded={deliveryNotesOpen}>配送須知</summary><div className="deliveryExplanationBody"><div><strong>📍 永春市場自取</strong><p>請依約定時間至永春市場取貨。</p></div><div><strong>🚚 台北市配送</strong><p>單筆消費滿 2500，即可協助配送到府。</p></div><div><strong>❄️ 冷凍宅配</strong><p>韓九補貼一半運費。</p></div><div><strong>🏪 7-11 冷凍交貨便</strong><p>韓九補貼一半運費，實際寄送仍依商品及數量安排。</p></div></div></details>
             </fieldset>
             <div className="checkoutFields"><label>姓名<input autoComplete="name" value={form.customer_name} onChange={(event) => setForm({ ...form, customer_name: event.target.value })} /></label><label>電話<input type="tel" inputMode="tel" autoComplete="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
               {form.fulfillment === "永春市場自取" && <><label>取貨日期<input type="date" value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>取貨時間<input type="time" value={form.pickupTime} onChange={(event) => setForm({ ...form, pickupTime: event.target.value })} /></label></>}
