@@ -31,6 +31,10 @@ export function isValidTaiwanMobile(value: string) {
   return /^09\d{8}$/.test(normalizeTaiwanMobile(value));
 }
 
+export function isValidEmail(value: string) {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
+}
+
 export function validateTaipeiDateTime(date: string, time = "", now = new Date()) {
   if (!date) return "";
   const today = taipeiToday(now);
