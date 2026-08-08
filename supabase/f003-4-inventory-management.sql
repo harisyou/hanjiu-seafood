@@ -135,6 +135,98 @@ revoke all on function public.admin_create_inventory_product(text, boolean, text
 grant execute on function public.admin_create_inventory_product(text, boolean, text, text, integer, integer, boolean)
   to authenticated;
 
+create or replace function public.admin_update_inventory_variants(
+  p_product_id uuid,
+  p_variants jsonb
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_item jsonb;
+  v_variant_id uuid;
+  v_variant_id_text text;
+  v_variant_name text;
+  v_price bigint;
+  v_inventory bigint;
+  v_seen_ids uuid[] := '{}';
+  v_expected integer;
+  v_updated integer;
+begin
+  if not public.is_hanjiu_admin() then raise exception 'admin_required'; end if;
+  if p_product_id is null then raise exception 'product_id_required'; end if;
+  if jsonb_typeof(p_variants) is distinct from 'array' or jsonb_array_length(p_variants) = 0 then
+    raise exception 'variants_required';
+  end if;
+  if jsonb_array_length(p_variants) > 200 then raise exception 'too_many_variants'; end if;
+
+  v_expected := jsonb_array_length(p_variants);
+  for v_item in select value from jsonb_array_elements(p_variants) loop
+    if jsonb_typeof(v_item) is distinct from 'object' then raise exception 'invalid_variant'; end if;
+
+    v_variant_id_text := v_item->>'id';
+    if v_variant_id_text is null or v_variant_id_text !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+      raise exception 'invalid_variant_id';
+    end if;
+    v_variant_id := v_variant_id_text::uuid;
+    if v_variant_id = any(v_seen_ids) then raise exception 'duplicate_variant_id'; end if;
+    v_seen_ids := array_append(v_seen_ids, v_variant_id);
+
+    if jsonb_typeof(v_item->'name') is distinct from 'string' then raise exception 'variant_name_required'; end if;
+    v_variant_name := btrim(v_item->>'name');
+    if v_variant_name is null or v_variant_name = '' then raise exception 'variant_name_required'; end if;
+    if length(v_variant_name) > 120 then raise exception 'invalid_length'; end if;
+
+    if jsonb_typeof(v_item->'price') is distinct from 'number' or (v_item->>'price') is null
+      or (v_item->>'price') !~ '^-?[0-9]+$' then
+      raise exception 'invalid_price';
+    end if;
+    v_price := (v_item->>'price')::bigint;
+    if v_price < 0 or v_price > 2147483647 then raise exception 'invalid_price'; end if;
+
+    if jsonb_typeof(v_item->'inventory') is distinct from 'number' or (v_item->>'inventory') is null
+      or (v_item->>'inventory') !~ '^-?[0-9]+$' then
+      raise exception 'invalid_inventory';
+    end if;
+    v_inventory := (v_item->>'inventory')::bigint;
+    if v_inventory < 0 or v_inventory > 2147483647 then raise exception 'invalid_inventory'; end if;
+
+    if jsonb_typeof(v_item->'active') is distinct from 'boolean' then raise exception 'invalid_active'; end if;
+    if not exists (
+      select 1 from public.product_variants variant
+      where variant.id = v_variant_id and variant.product_id = p_product_id
+    ) then
+      raise exception 'variant_product_mismatch';
+    end if;
+  end loop;
+
+  with payload as (
+    select id, btrim(name) as name, price, inventory, active
+    from jsonb_to_recordset(p_variants)
+      as item(id uuid, name text, price integer, inventory integer, active boolean)
+  )
+  update public.product_variants variant
+  set name = payload.name,
+      price = payload.price,
+      inventory = payload.inventory,
+      active = payload.active
+  from payload
+  where variant.id = payload.id
+    and variant.product_id = p_product_id;
+
+  get diagnostics v_updated = row_count;
+  if v_updated <> v_expected then raise exception 'batch_update_incomplete'; end if;
+  return v_updated;
+end;
+$$;
+
+revoke all on function public.admin_update_inventory_variants(uuid, jsonb)
+  from public, anon, authenticated;
+grant execute on function public.admin_update_inventory_variants(uuid, jsonb)
+  to authenticated;
+
 -- Preserve the production Checkout API while making inventory reservation
 -- atomic. The conditional UPDATE obtains a row lock and only succeeds when
 -- the requested quantity is still available at the instant of deduction.

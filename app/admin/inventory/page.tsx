@@ -17,6 +17,7 @@ export default function AdminInventoryPage() {
   const [filter, setFilter] = useState<InventoryFilter>("all");
   const [notice, setNotice] = useState("");
   const [busyKey, setBusyKey] = useState("");
+  const [dirtyProducts, setDirtyProducts] = useState<Record<string, boolean>>({});
   const [showCreate, setShowCreate] = useState(false);
   const [newProduct, setNewProduct] = useState(newProductInitial);
 
@@ -32,26 +33,36 @@ export default function AdminInventoryPage() {
 
   useEffect(() => { supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user.email || null); setAuthReady(true); if (data.session) load(); }); }, [load, supabase]);
 
-  function changeVariant(productId: string, variantId: string, patch: Partial<ProductVariant>) {
+  function changeVariant(productId: string, variantId: string, patch: Partial<ProductVariant>, markDirty = true) {
     setProducts((current) => current.map((product) => product.id === productId ? { ...product, variants: product.variants.map((variant) => variant.id === variantId ? { ...variant, ...patch } : variant) } : product));
+    if (markDirty) setDirtyProducts((current) => ({ ...current, [productId]: true }));
   }
 
-  async function saveVariant(product: InventoryProduct, variant: ProductVariant) {
-    const validation = validateInventoryValues(variant.name, variant.price, variant.inventory);
-    if (validation) return setNotice(validation);
-    setBusyKey(variant.id); setNotice("");
-    const { error } = await supabase.from("product_variants").update({ name: variant.name.trim(), price: variant.price, inventory: variant.inventory, active: variant.active }).eq("id", variant.id);
+  async function saveAllVariants(product: InventoryProduct) {
+    for (const [index, variant] of product.variants.entries()) {
+      const validation = validateInventoryValues(variant.name, variant.price, variant.inventory);
+      if (validation) return setNotice(`第 ${index + 1} 個規格：${validation}`);
+    }
+    setBusyKey(`batch:${product.id}`); setNotice("");
+    const { error } = await supabase.rpc("admin_update_inventory_variants", {
+      p_product_id: product.id,
+      p_variants: product.variants.map((variant) => ({ id: variant.id, name: variant.name.trim(), price: variant.price, inventory: variant.inventory, active: variant.active }))
+    });
     setBusyKey("");
-    if (error) setNotice("規格更新失敗，請確認管理員權限與輸入內容。");
-    else { setNotice(`${product.name}｜${variant.name} 已更新。`); await load(); }
+    if (error) setNotice("整批儲存失敗，未更新任何規格。請確認管理員權限與欄位內容。");
+    else {
+      setDirtyProducts((current) => ({ ...current, [product.id]: false }));
+      setNotice(`${product.name}｜全部規格已儲存。`);
+    }
   }
 
   async function markSoldOut(product: InventoryProduct, variant: ProductVariant) {
-    changeVariant(product.id, variant.id, { inventory: 0 });
+    const previousInventory = variant.inventory;
+    changeVariant(product.id, variant.id, { inventory: 0 }, false);
     setBusyKey(variant.id);
     const { error } = await supabase.from("product_variants").update({ inventory: 0 }).eq("id", variant.id);
     setBusyKey("");
-    if (error) { setNotice("標記售完失敗。"); await load(); }
+    if (error) { changeVariant(product.id, variant.id, { inventory: previousInventory }, false); setNotice("標記售完失敗，剩餘尾數未變更。"); }
     else setNotice(`${product.name}｜${variant.name} 已標記售完。`);
   }
 
@@ -89,6 +100,10 @@ export default function AdminInventoryPage() {
     {showCreate && <form className="panel inventoryCreate" onSubmit={createProduct}><h2>新增今日魚貨</h2><p className="inventoryGuidance">每個重量區間建立一個規格；重量皆為魚貨處理前重量。</p><div><label>商品名稱 *<input value={newProduct.productName} onChange={(event) => setNewProduct({ ...newProduct, productName: event.target.value })} /></label><label>第一個重量區間 *<input placeholder="例如：150g～200g" value={newProduct.variantName} onChange={(event) => setNewProduct({ ...newProduct, variantName: event.target.value })} /></label><label>固定售價 *<input type="number" min={0} step={1} value={newProduct.price} onChange={(event) => setNewProduct({ ...newProduct, price: Number(event.target.value) })} /></label><label>剩餘尾數 *<input type="number" min={0} step={1} value={newProduct.inventory} onChange={(event) => setNewProduct({ ...newProduct, inventory: Number(event.target.value) })} /></label></div><label className="check"><input type="checkbox" checked={newProduct.processingEnabled} onChange={(event) => setNewProduct({ ...newProduct, processingEnabled: event.target.checked })} />啟用魚貨處理</label><button disabled={busyKey === "create"}>{busyKey === "create" ? "建立中…" : "建立商品與規格"}</button></form>}
     <section className="panel inventoryTools"><label>搜尋<input type="search" placeholder="商品或規格名稱" value={search} onChange={(event) => setSearch(event.target.value)} /></label><div role="group" aria-label="商品篩選">{([['all','全部'],['selling','販售中'],['sold_out','售完'],['hidden','已下架']] as const).map(([value,label]) => <button type="button" className={filter === value ? "isSelected" : ""} onClick={() => setFilter(value)} key={value}>{label}</button>)}</div></section>
     {notice && <p className="notice centeredNotice" aria-live="polite">{notice}</p>}
-    <section className="inventoryProductList">{visibleProducts.map((product) => <article className="panel inventoryProductCard" key={product.id}><header><div><h2>{product.name}</h2><span className={`inventoryState state-${inventoryProductState(product)}`}>{inventoryProductState(product) === "selling" ? "販售中" : inventoryProductState(product) === "sold_out" ? "售完" : "已下架"}</span><small>{product.processing_enabled ? "🐟 已啟用處理" : "不提供處理"}</small></div><div><Link className="buttonLink secondaryAdminAction" href={`/admin/inventory/${product.id}`}>編輯商品</Link><Link className="buttonLink secondaryAdminAction" href={`/admin/processing?productId=${product.id}`}>處理設定</Link><button type="button" disabled={busyKey === product.id} onClick={() => toggleProduct(product)}>{product.status === "hidden" ? "重新上架" : "下架商品"}</button></div></header><div className="inventoryVariants">{product.variants.map((variant) => <div className="inventoryVariantRow" key={variant.id}><label>重量區間（處理前）<input placeholder="例如：150g～200g" value={variant.name} onChange={(event) => changeVariant(product.id, variant.id, { name: event.target.value })} /></label><label>固定售價<input type="number" min={0} step={1} value={variant.price} onChange={(event) => changeVariant(product.id, variant.id, { price: Number(event.target.value) })} /></label><label>剩餘尾數<input type="number" min={0} step={1} value={variant.inventory} onChange={(event) => changeVariant(product.id, variant.id, { inventory: Number(event.target.value) })} /></label><label className="inventoryActive"><input type="checkbox" checked={variant.active} onChange={(event) => changeVariant(product.id, variant.id, { active: event.target.checked })} />{variant.active ? "規格上架" : "規格下架"}</label><div><button type="button" disabled={busyKey === variant.id} onClick={() => saveVariant(product, variant)}>{busyKey === variant.id ? "儲存中…" : "儲存"}</button><button type="button" className="secondaryAdminAction" disabled={busyKey === variant.id || variant.inventory === 0} onClick={() => markSoldOut(product, variant)}>標記售完</button></div></div>)}</div></article>)}</section>
+    <section className="inventoryProductList">{visibleProducts.map((product) => {
+      const batchBusy = busyKey === `batch:${product.id}`;
+      const dirty = Boolean(dirtyProducts[product.id]);
+      return <article className="panel inventoryProductCard" key={product.id}><header><div><h2>{product.name}</h2><span className={`inventoryState state-${inventoryProductState(product)}`}>{inventoryProductState(product) === "selling" ? "販售中" : inventoryProductState(product) === "sold_out" ? "售完" : "已下架"}</span><small>{product.processing_enabled ? "🐟 已啟用處理" : "不提供處理"}</small></div><div><Link className="buttonLink secondaryAdminAction" href={`/admin/inventory/${product.id}`}>編輯商品</Link><Link className="buttonLink secondaryAdminAction" href={`/admin/processing?productId=${product.id}`}>處理設定</Link><button type="button" disabled={busyKey === product.id} onClick={() => toggleProduct(product)}>{product.status === "hidden" ? "重新上架" : "下架商品"}</button></div></header><fieldset className="inventoryVariants inventoryVariantsFieldset" disabled={batchBusy}>{product.variants.map((variant) => <div className="inventoryVariantRow" key={variant.id}><label>重量區間（處理前）<input placeholder="例如：150g～200g" value={variant.name} onChange={(event) => changeVariant(product.id, variant.id, { name: event.target.value })} /></label><label>固定售價<input type="number" min={0} step={1} value={variant.price} onChange={(event) => changeVariant(product.id, variant.id, { price: Number(event.target.value) })} /></label><label>剩餘尾數<input type="number" min={0} step={1} value={variant.inventory} onChange={(event) => changeVariant(product.id, variant.id, { inventory: Number(event.target.value) })} /></label><label className="inventoryActive"><input type="checkbox" checked={variant.active} onChange={(event) => changeVariant(product.id, variant.id, { active: event.target.checked })} />{variant.active ? "規格上架" : "規格下架"}</label><div><button type="button" className="secondaryAdminAction" disabled={busyKey === variant.id || variant.inventory === 0 || batchBusy} onClick={() => markSoldOut(product, variant)}>標記售完</button></div></div>)}</fieldset><footer className="inventoryBatchActions"><span aria-live="polite">{dirty ? "有尚未儲存的規格變更" : "全部規格已儲存"}</span><button type="button" disabled={!dirty || batchBusy} onClick={() => saveAllVariants(product)}>{batchBusy ? "儲存中…" : dirty ? "儲存全部規格" : "已儲存"}</button></footer></article>;
+    })}</section>
   </main>;
 }

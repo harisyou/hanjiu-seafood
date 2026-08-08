@@ -17,8 +17,9 @@ test("reserves inventory with one conditional UPDATE", () => {
 });
 
 test("validates processing before the inventory side effect", () => {
-  const processingValidation = migration.indexOf("raise exception 'processing_updated'");
-  const inventoryUpdate = migration.indexOf("update public.product_variants variant");
+  const checkoutRpc = migration.slice(migration.indexOf("create or replace function public.create_checkout_order"));
+  const processingValidation = checkoutRpc.indexOf("raise exception 'processing_updated'");
+  const inventoryUpdate = checkoutRpc.indexOf("update public.product_variants variant");
   assert.ok(processingValidation > -1);
   assert.ok(inventoryUpdate > processingValidation);
 });
@@ -80,4 +81,41 @@ test("keeps the storefront Checkout and persisted-cart API contract", () => {
   assert.match(storefront, /localStorage\.setItem\(/);
   assert.match(storefront, /localStorage\.getItem\(/);
   assert.match(storefront, /variant_unavailable|訂單送出失敗/);
+});
+
+test("batch variant update is an admin-only transaction-safe RPC", () => {
+  assert.match(migration, /create or replace function public\.admin_update_inventory_variants\(\s*p_product_id uuid,\s*p_variants jsonb\s*\)/);
+  const batchRpc = migration.slice(
+    migration.indexOf("create or replace function public.admin_update_inventory_variants"),
+    migration.indexOf("-- Preserve the production Checkout API")
+  );
+  assert.match(batchRpc, /security definer\s+set search_path = public, pg_temp/i);
+  assert.match(batchRpc, /if not public\.is_hanjiu_admin\(\) then raise exception 'admin_required'/i);
+  assert.match(batchRpc, /variant\.id = v_variant_id and variant\.product_id = p_product_id/i);
+  assert.match(batchRpc, /with payload as \([\s\S]+?jsonb_to_recordset\(p_variants\)[\s\S]+?update public\.product_variants variant/i);
+  assert.match(batchRpc, /get diagnostics v_updated = row_count;\s+if v_updated <> v_expected then raise exception 'batch_update_incomplete'/i);
+  assert.match(migration, /revoke all on function public\.admin_update_inventory_variants\(uuid, jsonb\)\s+from public, anon, authenticated;/i);
+  assert.match(migration, /grant execute on function public\.admin_update_inventory_variants\(uuid, jsonb\)\s+to authenticated;/i);
+});
+
+test("batch RPC validates every editable variant field before UPDATE", () => {
+  const batchRpc = migration.slice(
+    migration.indexOf("create or replace function public.admin_update_inventory_variants"),
+    migration.indexOf("with payload as (")
+  );
+  for (const error of [
+    "variant_name_required",
+    "invalid_price",
+    "invalid_inventory",
+    "invalid_active",
+    "duplicate_variant_id",
+    "variant_product_mismatch"
+  ]) assert.ok(batchRpc.includes(error), `missing batch validation ${error}`);
+  assert.match(batchRpc, /jsonb_typeof\(p_variants\) is distinct from 'array'/i);
+  assert.match(batchRpc, /jsonb_typeof\(v_item->'name'\) is distinct from 'string'/i);
+  assert.match(batchRpc, /jsonb_typeof\(v_item->'price'\) is distinct from 'number'/i);
+  assert.match(batchRpc, /jsonb_typeof\(v_item->'inventory'\) is distinct from 'number'/i);
+  assert.match(batchRpc, /jsonb_typeof\(v_item->'active'\) is distinct from 'boolean'/i);
+  assert.match(batchRpc, /v_inventory < 0/);
+  assert.match(batchRpc, /\(v_item->>'inventory'\) !~ '\^-\?\[0-9\]\+\$'/);
 });
