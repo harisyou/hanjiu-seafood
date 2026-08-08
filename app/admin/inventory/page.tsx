@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { Product, ProductVariant } from "@/lib/catalog";
 import { InventoryFilter, InventoryProduct, inventoryProductState, matchesInventoryProduct, validateInventoryValues } from "@/lib/inventory";
+import { FishRequest } from "@/lib/fish-requests";
+import { buildFishMatches } from "@/lib/fish-matching";
 
 const newProductInitial = { productName: "", processingEnabled: false, variantName: "", price: 0, inventory: 0, active: true };
 
@@ -13,6 +15,7 @@ export default function AdminInventoryPage() {
   const [user, setUser] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [products, setProducts] = useState<InventoryProduct[]>([]);
+  const [requests, setRequests] = useState<FishRequest[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InventoryFilter>("all");
   const [notice, setNotice] = useState("");
@@ -22,13 +25,15 @@ export default function AdminInventoryPage() {
   const [newProduct, setNewProduct] = useState(newProductInitial);
 
   const load = useCallback(async () => {
-    const [productResult, variantResult] = await Promise.all([
+    const [productResult, variantResult, requestResult] = await Promise.all([
       supabase.from("products").select("*").order("sort_order"),
-      supabase.from("product_variants").select("*").order("sort_order")
+      supabase.from("product_variants").select("*").order("sort_order"),
+      supabase.from("fish_requests").select("*").order("created_at", { ascending: false })
     ]);
-    if (productResult.error || variantResult.error) return setNotice("庫存載入失敗，請確認 F003-4 migration 與管理員權限。");
+    if (productResult.error || variantResult.error || requestResult.error) return setNotice("庫存與配對資料載入失敗，請確認管理員權限。");
     const variants = (variantResult.data || []) as ProductVariant[];
     setProducts(((productResult.data || []) as Product[]).map((product) => ({ ...product, variants: variants.filter((variant) => variant.product_id === product.id) })));
+    setRequests((requestResult.data || []) as FishRequest[]);
   }, [supabase]);
 
   useEffect(() => { supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user.email || null); setAuthReady(true); if (data.session) load(); }); }, [load, supabase]);
@@ -92,6 +97,7 @@ export default function AdminInventoryPage() {
   }
 
   const visibleProducts = products.filter((product) => matchesInventoryProduct(product, search, filter));
+  const matches = buildFishMatches(products, products.flatMap((product) => product.variants), requests);
   if (!authReady) return <main className="admin"><section className="panel centeredNotice">驗證管理員身分中…</section></main>;
   if (!user) return <main className="admin"><section className="panel centeredNotice"><h1>此頁僅限管理員</h1><Link className="buttonLink" href="/admin">前往登入</Link></section></main>;
 
@@ -103,7 +109,8 @@ export default function AdminInventoryPage() {
     <section className="inventoryProductList">{visibleProducts.map((product) => {
       const batchBusy = busyKey === `batch:${product.id}`;
       const dirty = Boolean(dirtyProducts[product.id]);
-      return <article className="panel inventoryProductCard" key={product.id}><header><div><h2>{product.name}</h2><span className={`inventoryState state-${inventoryProductState(product)}`}>{inventoryProductState(product) === "selling" ? "販售中" : inventoryProductState(product) === "sold_out" ? "售完" : "已下架"}</span><small>{product.processing_enabled ? "🐟 已啟用處理" : "不提供處理"}</small></div><div><Link className="buttonLink secondaryAdminAction" href={`/admin/inventory/${product.id}`}>編輯商品</Link><Link className="buttonLink secondaryAdminAction" href={`/admin/processing?productId=${product.id}`}>處理設定</Link><button type="button" disabled={busyKey === product.id} onClick={() => toggleProduct(product)}>{product.status === "hidden" ? "重新上架" : "下架商品"}</button></div></header><fieldset className="inventoryVariants inventoryVariantsFieldset" disabled={batchBusy}>{product.variants.map((variant) => <div className="inventoryVariantRow" key={variant.id}><label>重量區間（處理前）<input placeholder="例如：150g～200g" value={variant.name} onChange={(event) => changeVariant(product.id, variant.id, { name: event.target.value })} /></label><label>固定售價<input type="number" min={0} step={1} value={variant.price} onChange={(event) => changeVariant(product.id, variant.id, { price: Number(event.target.value) })} /></label><label>剩餘尾數<input type="number" min={0} step={1} value={variant.inventory} onChange={(event) => changeVariant(product.id, variant.id, { inventory: Number(event.target.value) })} /></label><label className="inventoryActive"><input type="checkbox" checked={variant.active} onChange={(event) => changeVariant(product.id, variant.id, { active: event.target.checked })} />{variant.active ? "規格上架" : "規格下架"}</label><div><button type="button" className="secondaryAdminAction" disabled={busyKey === variant.id || variant.inventory === 0 || batchBusy} onClick={() => markSoldOut(product, variant)}>標記售完</button></div></div>)}</fieldset><footer className="inventoryBatchActions"><span aria-live="polite">{dirty ? "有尚未儲存的規格變更" : "全部規格已儲存"}</span><button type="button" disabled={!dirty || batchBusy} onClick={() => saveAllVariants(product)}>{batchBusy ? "儲存中…" : dirty ? "儲存全部規格" : "已儲存"}</button></footer></article>;
+      const match = matches.find((item) => item.product.id === product.id);
+      return <article className="panel inventoryProductCard" key={product.id}><header><div><h2>{product.name}</h2><span className={`inventoryState state-${inventoryProductState(product)}`}>{inventoryProductState(product) === "selling" ? "販售中" : inventoryProductState(product) === "sold_out" ? "售完" : "已下架"}</span>{match && <Link className="inventoryMatchIndicator" href={`/admin/matches?product=${product.id}`}>🔔 {match.requests.length} 人正在等</Link>}<small>{product.processing_enabled ? "🐟 已啟用處理" : "不提供處理"}</small></div><div><Link className="buttonLink secondaryAdminAction" href={`/admin/inventory/${product.id}`}>編輯商品</Link><Link className="buttonLink secondaryAdminAction" href={`/admin/processing?productId=${product.id}`}>處理設定</Link><button type="button" disabled={busyKey === product.id} onClick={() => toggleProduct(product)}>{product.status === "hidden" ? "重新上架" : "下架商品"}</button></div></header><fieldset className="inventoryVariants inventoryVariantsFieldset" disabled={batchBusy}>{product.variants.map((variant) => <div className="inventoryVariantRow" key={variant.id}><label>重量區間（處理前）<input placeholder="例如：150g～200g" value={variant.name} onChange={(event) => changeVariant(product.id, variant.id, { name: event.target.value })} /></label><label>固定售價<input type="number" min={0} step={1} value={variant.price} onChange={(event) => changeVariant(product.id, variant.id, { price: Number(event.target.value) })} /></label><label>剩餘尾數<input type="number" min={0} step={1} value={variant.inventory} onChange={(event) => changeVariant(product.id, variant.id, { inventory: Number(event.target.value) })} /></label><label className="inventoryActive"><input type="checkbox" checked={variant.active} onChange={(event) => changeVariant(product.id, variant.id, { active: event.target.checked })} />{variant.active ? "規格上架" : "規格下架"}</label><div><button type="button" className="secondaryAdminAction" disabled={busyKey === variant.id || variant.inventory === 0 || batchBusy} onClick={() => markSoldOut(product, variant)}>標記售完</button></div></div>)}</fieldset><footer className="inventoryBatchActions"><span aria-live="polite">{dirty ? "有尚未儲存的規格變更" : "全部規格已儲存"}</span><button type="button" disabled={!dirty || batchBusy} onClick={() => saveAllVariants(product)}>{batchBusy ? "儲存中…" : dirty ? "儲存全部規格" : "已儲存"}</button></footer></article>;
     })}</section>
   </main>;
 }
