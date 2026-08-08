@@ -21,6 +21,8 @@ test("draft workspace only accepts waiting/contacted requests", () => {
 test("draft products use catalog-aware matching and sellable inventory", () => {
   assert.equal(getDraftProducts([product()], [variant()], request()).length, 1);
   assert.equal(getDraftProducts([product({ fish_catalog_id: "fish-2" })], [variant()], request()).length, 0);
+  assert.equal(getDraftProducts([product({ fish_catalog_id: null })], [variant()], request()).length, 1);
+  assert.equal(getDraftProducts([product()], [variant()], request({ fish_catalog_id: null })).length, 1);
   assert.equal(getDraftProducts([product()], [variant({ inventory: 0 })], request()).length, 0);
   assert.equal(getDraftProducts([product({ status: "hidden" })], [variant()], request()).length, 0);
   assert.equal(isDraftVariantAvailable(variant({ active: false })), false);
@@ -54,7 +56,15 @@ test("RPC validates authoritative product, matching, price and availability", ()
   for (const code of ["fish_request_not_found", "fish_request_not_eligible", "fish_request_draft_exists", "variant_not_found", "variant_unavailable", "insufficient_inventory", "fish_request_product_mismatch", "invalid_quantity"]) assert.ok(migration.includes(code), code);
   assert.match(migration, /v_variant\.price, p_quantity/);
   assert.match(migration, /v_request\.status not in \('waiting', 'contacted'\)/);
+  assert.match(migration, /v_request\.fish_catalog_id is not null and v_variant\.fish_catalog_id is not null/);
+  assert.match(migration, /elsif lower\(regexp_replace\(btrim\(v_request\.fish_name\)/);
   assert.match(migration, /exception when unique_violation[\s\S]*fish_request_draft_exists/);
+});
+
+test("馬頭魚 legacy catalog gap uses normalized exact-name fallback, not a fuzzy match", () => {
+  const 馬頭魚Request = request({ fish_name: " 馬頭魚 ", fish_catalog_id: "legacy-catalog-id" });
+  assert.equal(getDraftProducts([product({ name: "馬頭魚", fish_catalog_id: null })], [variant()], 馬頭魚Request).length, 1);
+  assert.equal(getDraftProducts([product({ name: "馬頭", fish_catalog_id: null })], [variant()], 馬頭魚Request).length, 0);
 });
 
 test("workspace sends only IDs and quantity while explaining draft side effects", () => {
@@ -63,6 +73,12 @@ test("workspace sends only IDs and quantity while explaining draft side effects"
   assert.match(workspace, /不保留庫存、不扣庫存，也不會將需求標記為已完成/);
   assert.doesNotMatch(workspace, /admin_update_fish_request_status/);
   assert.match(contactWorkspace, /canCreateOrderDraft\(request\)/);
+});
+
+test("sold-out variants remain visible to admins but are disabled for draft creation", () => {
+  assert.equal(isDraftVariantAvailable(variant({ inventory: 0 })), false);
+  assert.match(workspace, /disabled=\{!isDraftVariantAvailable\(variant\)\}/);
+  assert.match(workspace, /variant\.inventory > 0 \? "剩餘 " \+ variant\.inventory \+ " 尾" : "已售完"/);
 });
 
 test("formal today-order summary excludes drafts", () => {

@@ -91,8 +91,11 @@ begin
   end if;
   if p_quantity > v_variant.inventory then raise exception 'insufficient_inventory'; end if;
 
-  if v_request.fish_catalog_id is not null then
-    if v_variant.fish_catalog_id is distinct from v_request.fish_catalog_id then
+  -- Keep F003-6 matching semantics: catalog IDs are authoritative only when
+  -- both historical rows are classified. If either side is unclassified,
+  -- require the same normalized fish-name snapshot instead of fuzzy matching.
+  if v_request.fish_catalog_id is not null and v_variant.fish_catalog_id is not null then
+    if v_variant.fish_catalog_id <> v_request.fish_catalog_id then
       raise exception 'fish_request_product_mismatch';
     end if;
   elsif lower(regexp_replace(btrim(v_request.fish_name), '[[:space:]　]+', ' ', 'g'))
