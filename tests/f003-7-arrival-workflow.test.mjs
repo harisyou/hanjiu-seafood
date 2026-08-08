@@ -52,6 +52,15 @@ test("status RPC is admin-only, validates request ID and never touches inventory
   assert.doesNotMatch(sql, /update public\.product_variants|\binventory\b\s*=/i);
 });
 
+test("NULL status is rejected before fish_requests can be updated", async () => {
+  const sql = await readFile(new URL("../supabase/f003-7-arrival-notification-workflow.sql", import.meta.url), "utf8");
+  const nullValidation = "if p_status is null\r\n    or p_status not in ('waiting', 'contacted', 'converted', 'cancelled') then";
+  const normalizedSql = sql.replaceAll("\n", "\r\n").replaceAll("\r\r\n", "\r\n");
+  assert.match(normalizedSql, new RegExp(nullValidation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.ok(sql.indexOf("if p_status is null") < sql.indexOf("update public.fish_requests"));
+  assert.match(sql, /raise exception 'invalid_fish_request_status'/);
+});
+
 test("migration preserves all historical statuses and both create_fish_request overloads", async () => {
   const [workflowSql, catalogSql] = await Promise.all([
     readFile(new URL("../supabase/f003-7-arrival-notification-workflow.sql", import.meta.url), "utf8"),

@@ -21,7 +21,8 @@ declare
 begin
   if not public.is_hanjiu_admin() then raise exception 'admin_required'; end if;
   if p_request_id is null then raise exception 'fish_request_not_found'; end if;
-  if p_status not in ('waiting', 'contacted', 'converted', 'cancelled') then
+  if p_status is null
+    or p_status not in ('waiting', 'contacted', 'converted', 'cancelled') then
     raise exception 'invalid_fish_request_status';
   end if;
 
