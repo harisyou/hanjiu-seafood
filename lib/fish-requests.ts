@@ -1,4 +1,4 @@
-export type FishRequestStatus = "waiting" | "matched" | "contacted" | "converted" | "closed";
+export type FishRequestStatus = "waiting" | "matched" | "contacted" | "converted" | "closed" | "cancelled";
 export type NotificationChannel = "line" | "email" | "phone";
 
 export type FishRequest = {
@@ -26,8 +26,16 @@ export const fishRequestStatusOptions: Array<{ value: FishRequestStatus; label: 
   { value: "waiting", label: "等待中" },
   { value: "matched", label: "已找到" },
   { value: "contacted", label: "已聯絡" },
-  { value: "converted", label: "已成交" },
-  { value: "closed", label: "已結束" }
+  { value: "converted", label: "已完成" },
+  { value: "closed", label: "已結束（舊狀態）" },
+  { value: "cancelled", label: "已取消" }
+];
+
+export const arrivalWorkflowActions: Array<{ status: FishRequestStatus; label: string }> = [
+  { status: "contacted", label: "標記已聯絡" },
+  { status: "converted", label: "標記已完成" },
+  { status: "waiting", label: "繼續等待" },
+  { status: "cancelled", label: "取消需求" }
 ];
 
 export function fishRequestStatusLabel(status: FishRequestStatus) {

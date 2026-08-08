@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { Product } from "@/lib/catalog";
+import { Product, ProductVariant } from "@/lib/catalog";
+import { FishRequest } from "@/lib/fish-requests";
+import { FishCatalogItem } from "@/lib/fish-catalog";
+import { buildFishMatchGroups } from "@/lib/fish-matching";
 
 type Order = { id: string; customer_name: string; phone: string; fulfillment: string; processing: string; note: string | null; status: string; created_at: string };
 type OrderItem = { id: string; order_id: string; product_name: string; variant_name: string | null; quantity: number; processing_preset_name: string | null; processing_option_names: string[]; processing_note: string | null };
@@ -55,19 +58,27 @@ export default function AdminPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingMatchCount, setPendingMatchCount] = useState(0);
   const [dragging, setDragging] = useState(false);
 
   const loadAll = useCallback(async () => {
-    const [productResult, orderResult, orderItemResult] = await Promise.all([
+    const [productResult, orderResult, orderItemResult, variantResult, requestResult, catalogResult] = await Promise.all([
       supabase.from("products").select("*").order("sort_order"),
       supabase.from("orders").select("*").order("created_at", { ascending: false }),
-      supabase.from("order_items").select("id,order_id,product_name,variant_name,quantity,processing_preset_name,processing_option_names,processing_note")
+      supabase.from("order_items").select("id,order_id,product_name,variant_name,quantity,processing_preset_name,processing_option_names,processing_note"),
+      supabase.from("product_variants").select("*").order("sort_order"),
+      supabase.from("fish_requests").select("*").order("created_at", { ascending: false }),
+      supabase.from("fish_catalog").select("*").order("sort_order")
     ]);
     if (productResult.error) setNotice(`商品載入失敗：${productResult.error.message}`);
     else setProducts((productResult.data || []) as Product[]);
     if (orderResult.error) setNotice(`訂單載入失敗：${orderResult.error.message}`);
     else setOrders((orderResult.data || []) as Order[]);
     if (!orderItemResult.error) setOrderItems((orderItemResult.data || []) as OrderItem[]);
+    if (!productResult.error && !variantResult.error && !requestResult.error && !catalogResult.error) {
+      const groups = buildFishMatchGroups((productResult.data || []) as Product[], (variantResult.data || []) as ProductVariant[], (requestResult.data || []) as FishRequest[], (catalogResult.data || []) as FishCatalogItem[]);
+      setPendingMatchCount(new Set(groups.flatMap((group) => group.requests.map((request) => request.id))).size);
+    }
   }, [supabase]);
 
   useEffect(() => {
@@ -148,7 +159,7 @@ export default function AdminPage() {
 
   return (
     <main className="admin">
-      <header className="adminTop"><div><Link href="/">← 返回商店</Link><h1>海鮮商品後台</h1><nav className="adminNavigation" aria-label="後台功能"><Link href="/admin/orders">🛒 今日訂單</Link><Link href="/admin/requests">🔔 想找的魚</Link><Link href="/admin/matches">🐟 到貨配對</Link><Link href="/admin/fish-catalog">🐟 魚種管理</Link><Link href="/admin/customers">👥 客戶</Link><Link href="/admin/inventory">🐟 今日魚貨</Link></nav><p>{user}</p></div><button onClick={() => supabase.auth.signOut().then(() => setUser(""))}>登出</button></header>
+      <header className="adminTop"><div><Link href="/">← 返回商店</Link><h1>海鮮商品後台</h1><nav className="adminNavigation" aria-label="後台功能"><Link href="/admin/orders">🛒 今日訂單</Link><Link href="/admin/requests">🔔 想找的魚</Link><Link href="/admin/matches">🔔 到貨配對{pendingMatchCount > 0 ? ` ${pendingMatchCount}` : ""}</Link><Link href="/admin/fish-catalog">🐟 魚種管理</Link><Link href="/admin/customers">👥 客戶</Link><Link href="/admin/inventory">🐟 今日魚貨</Link></nav><p>{user}</p></div><button onClick={() => supabase.auth.signOut().then(() => setUser(""))}>登出</button></header>
       <section className="adminGrid">
         <form className="panel" onSubmit={save}>
           <h2>{editingId ? "編輯商品" : "新增商品"}</h2>
