@@ -9,6 +9,7 @@ export type FishRequest = {
   email: string | null;
   line_user_id: string | null;
   fish_name: string;
+  fish_catalog_id: string | null;
   quantity_request: string;
   size_preference: string | null;
   budget: string | null;
@@ -42,4 +43,10 @@ export function notificationLabel(request: FishRequest) {
 export function formatWantedBy(value: string | null) {
   if (!value) return "未指定";
   return new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric" }).format(new Date(`${value}T00:00:00`));
+}
+
+export function fishRequestDisplayName(request: FishRequest, catalogName?: string) {
+  if (!request.fish_catalog_id) return `其他：${request.fish_name}`;
+  if (catalogName && catalogName !== request.fish_name) return `${request.fish_name} → ${catalogName}`;
+  return catalogName || request.fish_name;
 }
