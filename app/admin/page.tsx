@@ -134,17 +134,9 @@ export default function AdminPage() {
   }
 
   async function toggle(product: Product) {
-    const status = product.status === "available" ? "sold_out" : "available";
+    const status = product.status === "hidden" ? "available" : "hidden";
     const { error } = await supabase.from("products").update({ status }).eq("id", product.id);
     if (error) setNotice(`狀態更新失敗：${error.message}`); else await loadAll();
-  }
-
-  async function remove(product: Product) {
-    if (!confirm(`確定刪除「${product.name}」？`)) return;
-    const { error } = await supabase.from("products").delete().eq("id", product.id);
-    if (error) return setNotice(`刪除失敗：${error.message}`);
-    const path = storagePath(product.image_url); if (path) await supabase.storage.from("product-images").remove([path]);
-    await loadAll();
   }
 
   async function setOrderStatus(id: string, status: string) {
@@ -156,7 +148,7 @@ export default function AdminPage() {
 
   return (
     <main className="admin">
-      <header className="adminTop"><div><Link href="/">← 返回商店</Link><h1>海鮮商品後台</h1><nav className="adminNavigation" aria-label="後台功能"><Link href="/admin/orders">🛒 今日訂單</Link><Link href="/admin/requests">🔔 想找的魚</Link><Link href="/admin/customers">👥 客戶</Link></nav><p>{user}</p></div><button onClick={() => supabase.auth.signOut().then(() => setUser(""))}>登出</button></header>
+      <header className="adminTop"><div><Link href="/">← 返回商店</Link><h1>海鮮商品後台</h1><nav className="adminNavigation" aria-label="後台功能"><Link href="/admin/orders">🛒 今日訂單</Link><Link href="/admin/requests">🔔 想找的魚</Link><Link href="/admin/customers">👥 客戶</Link><Link href="/admin/inventory">🐟 今日魚貨</Link></nav><p>{user}</p></div><button onClick={() => supabase.auth.signOut().then(() => setUser(""))}>登出</button></header>
       <section className="adminGrid">
         <form className="panel" onSubmit={save}>
           <h2>{editingId ? "編輯商品" : "新增商品"}</h2>
@@ -176,7 +168,7 @@ export default function AdminPage() {
           {editingId && <button className="cancelEditButton" type="button" onClick={resetForm}>取消編輯</button>}
           {notice && <p className="notice">{notice}</p>}
         </form>
-        <section className="panel"><h2>商品管理</h2>{products.map((product) => <div className="manageRow" key={product.id}><div className="manageProduct"><div className="manageThumb">{product.image_url ? <img src={product.image_url} alt={product.name} /> : <span>🦀</span>}</div><div><strong>{product.name}</strong><small>{product.status === "available" ? "可購買" : product.status === "sold_out" ? "已售完" : "已隱藏"}</small></div></div><div className="manageActions"><Link className="buttonLink" href={`/admin/variants?productId=${product.id}`}>⚖️ 管理規格</Link><Link className="buttonLink" href={`/admin/processing?productId=${product.id}`}>🐟 處理設定</Link><button type="button" onClick={() => editProduct(product)}>編輯</button><button type="button" onClick={() => toggle(product)}>{product.status === "available" ? "下架" : "上架"}</button><button type="button" onClick={() => remove(product)}>刪除</button></div></div>)}</section>
+        <section className="panel"><h2>商品管理</h2>{products.map((product) => <div className="manageRow" key={product.id}><div className="manageProduct"><div className="manageThumb">{product.image_url ? <img src={product.image_url} alt={product.name} /> : <span>🦀</span>}</div><div><strong>{product.name}</strong><small>{product.status === "available" ? "可購買" : product.status === "sold_out" ? "已售完" : "已隱藏"}</small></div></div><div className="manageActions"><Link className="buttonLink" href={`/admin/variants?productId=${product.id}`}>⚖️ 管理規格</Link><Link className="buttonLink" href={`/admin/processing?productId=${product.id}`}>🐟 處理設定</Link><button type="button" onClick={() => editProduct(product)}>編輯</button><button type="button" onClick={() => toggle(product)}>{product.status === "hidden" ? "上架" : "下架"}</button></div></div>)}</section>
       </section>
       <section className="panel orders"><h2>訂單管理</h2>{orders.map((order) => <article className="orderCard" key={order.id}><div><strong>{order.customer_name}</strong><p>{order.phone}</p></div><div><p>{order.fulfillment}</p><p>{order.processing}</p></div><div><p>{order.note || "沒有備註"}</p>{orderItems.filter((item) => item.order_id === order.id).map((item) => <div className="adminOrderItem" key={item.id}><strong>{item.product_name}｜{item.variant_name}｜×{item.quantity}</strong><small>處理：{item.processing_preset_name || "不處理"}{item.processing_option_names?.length ? `｜${item.processing_option_names.join("、")}` : ""}</small>{item.processing_note && <small>其他需求：{item.processing_note}</small>}</div>)}</div><select value={order.status} onChange={(e) => setOrderStatus(order.id, e.target.value)}><option value="new">新訂單</option><option value="contacted">已聯絡</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></article>)}</section>
     </main>

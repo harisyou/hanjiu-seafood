@@ -88,11 +88,11 @@ export default function ProductVariantsPage() {
   }
 
   async function removeVariant(variant: ProductVariant) {
-    if (!confirm(`確定刪除規格「${variant.name}」？`)) return;
-    const { error } = await supabase.from("product_variants").delete().eq("id", variant.id);
-    if (error) setNotice(`刪除失敗：${error.message}`);
+    if (!confirm(`確定下架規格「${variant.name}」？歷史訂單資料不會受影響。`)) return;
+    const { error } = await supabase.from("product_variants").update({ active: false }).eq("id", variant.id);
+    if (error) setNotice(`下架失敗：${error.message}`);
     else {
-      setNotice("規格已刪除。");
+      setNotice("規格已下架。");
       await loadProduct(productId);
     }
   }
@@ -111,10 +111,10 @@ export default function ProductVariantsPage() {
         <section className="adminGrid">
           <form className="panel" onSubmit={saveVariant}>
             <h2>{editingId ? "編輯規格" : "新增規格"}</h2>
-            <label>規格名稱<input required value={form.name} placeholder="例如：約8兩" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-            <label>售價（NT$）<input required min={0} type="number" value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} /></label>
-            <label>實際庫存<input required min={0} type="number" value={form.inventory} onChange={(e) => setForm({ ...form, inventory: Number(e.target.value) })} /></label>
-            <small className="uploadHelp">庫存數量只供後台使用，前台只會顯示庫存狀態。</small>
+            <label>重量區間（處理前）<input required value={form.name} placeholder="例如：150g～200g" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+            <label>固定售價（NT$）<input required min={0} type="number" value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} /></label>
+            <label>剩餘尾數<input required min={0} type="number" value={form.inventory} onChange={(e) => setForm({ ...form, inventory: Number(e.target.value) })} /></label>
+            <small className="uploadHelp">每個重量區間維持固定售價；重量皆為處理前重量，剩餘尾數為目前可販售數量。</small>
             <label>排序<input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} /></label>
             <label className="check"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />前台顯示</label>
             <button>{editingId ? "更新規格" : "新增規格"}</button>
@@ -128,11 +128,11 @@ export default function ProductVariantsPage() {
                 <div className="variantSummary">
                   <strong>{variant.name}</strong>
                   <span>{formatPrice(variant.price)}</span>
-                  <small>{inventoryLabel(variant.inventory)} · {variant.active ? "顯示中" : "已隱藏"}</small>
+                  <small>{variant.inventory > 0 ? `剩餘 ${variant.inventory} 尾` : inventoryLabel(variant.inventory)} · {variant.active ? "顯示中" : "已隱藏"}</small>
                 </div>
                 <div className="manageActions">
                   <button type="button" onClick={() => editVariant(variant)}>編輯</button>
-                  <button type="button" onClick={() => removeVariant(variant)}>刪除</button>
+                  <button type="button" onClick={() => removeVariant(variant)}>下架</button>
                 </div>
               </div>
             ))}
