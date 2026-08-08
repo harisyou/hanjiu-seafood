@@ -7,7 +7,8 @@ import { AdminOrder, formatOrderTime, orderStatusLabel, orderStatusOptions, orde
 
 const deliveryOptions = ["永春市場自取", "台北市配送", "冷凍宅配", "7-ELEVEN 冷凍交貨便"];
 
-function deliveryLabel(value: string) {
+function deliveryLabel(value: string | null) {
+  if (!value) return "尚未設定配送";
   if (value === "永春市場自取") return "📍 永春市場自取";
   if (value === "台北市配送") return "🚚 台北市配送";
   if (value === "冷凍宅配") return "❄️ 冷凍宅配";
@@ -41,7 +42,7 @@ export default function AdminOrdersPage() {
     });
   }, [loadOrders, supabase]);
 
-  const todayOrders = orders.filter((order) => new Date(order.created_at).toDateString() === new Date().toDateString());
+  const todayOrders = orders.filter((order) => order.status !== "draft" && new Date(order.created_at).toDateString() === new Date().toDateString());
   const filteredOrders = useMemo(() => {
     const keyword = search.trim().toLocaleLowerCase("zh-TW");
     const next = orders.filter((order) => {
@@ -50,7 +51,7 @@ export default function AdminOrdersPage() {
       const matchesStatus = !statusFilter || normalizedStatus === statusFilter;
       return matchesSearch && matchesStatus && (!deliveryFilter || order.fulfillment === deliveryFilter) && (!paymentFilter || order.payment_status === paymentFilter);
     });
-    return next.sort((a, b) => sort === "delivery" ? a.fulfillment.localeCompare(b.fulfillment, "zh-TW") : sort === "status" ? orderStatusLabel(a.status).localeCompare(orderStatusLabel(b.status), "zh-TW") : new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return next.sort((a, b) => sort === "delivery" ? (a.fulfillment || "").localeCompare(b.fulfillment || "", "zh-TW") : sort === "status" ? orderStatusLabel(a.status).localeCompare(orderStatusLabel(b.status), "zh-TW") : new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [deliveryFilter, orders, paymentFilter, search, sort, statusFilter]);
 
   if (!authReady) return <main className="admin"><section className="panel centeredNotice">驗證管理員身分中…</section></main>;

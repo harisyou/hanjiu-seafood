@@ -1,4 +1,4 @@
-export type OrderStatus = "new" | "processing" | "ready" | "completed" | "cancelled" | "contacted" | "confirmed" | "paid" | "shipped";
+export type OrderStatus = "draft" | "new" | "processing" | "ready" | "completed" | "cancelled" | "contacted" | "confirmed" | "paid" | "shipped";
 export type PaymentStatus = "unpaid" | "paid";
 
 export type AdminOrderItem = {
@@ -18,11 +18,12 @@ export type AdminOrderItem = {
 export type AdminOrder = {
   id: string;
   customer_id?: string | null;
+  fish_request_id?: string | null;
   customer_name: string;
   phone: string;
   email?: string | null;
-  fulfillment: string;
-  processing: string;
+  fulfillment: string | null;
+  processing: string | null;
   note: string | null;
   status: OrderStatus;
   payment_status: PaymentStatus;
@@ -40,6 +41,7 @@ export const orderStatusOptions: Array<{ value: OrderStatus; label: string }> = 
 
 export function orderStatusLabel(status: OrderStatus) {
   const legacyLabels: Partial<Record<OrderStatus, string>> = {
+    draft: "草稿",
     contacted: "處理中",
     confirmed: "處理中",
     paid: "處理中",

@@ -9,6 +9,7 @@ import { arrivalWorkflowActions, FishRequest, FishRequestStatus, fishRequestStat
 import { buildFishMatchGroups } from "@/lib/fish-matching";
 import { FishCatalogItem } from "@/lib/fish-catalog";
 import ContactWorkspace from "./contact-workspace";
+import OrderDraftWorkspace from "./order-draft-workspace";
 
 function AdminMatchesContent() {
   const supabase = useMemo(() => createClient(), []);
@@ -24,6 +25,7 @@ function AdminMatchesContent() {
   const [notice, setNotice] = useState("");
   const [busyId, setBusyId] = useState("");
   const [contactRequestId, setContactRequestId] = useState<string | null>(null);
+  const [draftRequestId, setDraftRequestId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [productResult, variantResult, requestResult, catalogResult] = await Promise.all([
@@ -70,6 +72,8 @@ function AdminMatchesContent() {
 
   const contactRequest = requests.find((request) => request.id === contactRequestId);
   const contactMatch = contactRequest ? matches.find((match) => match.requests.some((request) => request.id === contactRequest.id)) : undefined;
+  const draftRequest = requests.find((request) => request.id === draftRequestId);
+  const draftMatch = draftRequest ? matches.find((match) => match.requests.some((request) => request.id === draftRequest.id)) : undefined;
 
   return <main className="admin adminOrdersPage adminMatchesPage">
     <header className="adminTop ordersTop"><div><Link href="/admin">← 商品後台</Link><h1>🔔 到貨配對</h1><p>只顯示目前有可售規格，且魚名完全相符的有效需求。</p></div><Link className="buttonLink secondaryAdminAction" href="/admin/requests">全部需求</Link></header>
@@ -85,7 +89,8 @@ function AdminMatchesContent() {
         <div className="matchWorkflowActions" aria-label={`${request.customer_name} 的需求處理`}>{arrivalWorkflowActions.map((action) => <button type="button" className={action.status === "cancelled" ? "dangerSecondaryAction" : action.status === request.status ? "currentWorkflowAction" : "secondaryAdminAction"} disabled={busyId === request.id || action.status === request.status} onClick={() => updateStatus(request, action.status)} key={action.status}>{busyId === request.id ? "更新中…" : action.label}</button>)}</div>
       </article>)}</section>
     </> : <section className="matchSummaryList" aria-live="polite">{matches.length === 0 ? <div className="panel orderEmpty"><strong>目前沒有到貨配對</strong><p>有可售魚貨且魚種 ID 相同，或舊資料魚名完全相符時，配對會自動出現在這裡。</p></div> : matches.map((match) => <article className="panel matchSummaryCard" key={match.key}><div><small>🐟 已到貨</small><h2>{match.name}</h2><p>{match.availableVariants.length} 個可售規格</p></div><div><strong>{match.requests.length}</strong><span>位客人待處理</span><Link className="buttonLink" href={`/admin/matches?fish=${encodeURIComponent(match.key)}`}>展開處理</Link></div></article>)}</section>}
-    {contactRequest && contactMatch && <ContactWorkspace key={contactRequest.id} request={contactRequest} fishName={contactMatch.name} busy={busyId === contactRequest.id} onClose={() => setContactRequestId(null)} onUpdateStatus={(status) => updateStatus(contactRequest, status)} />}
+    {contactRequest && contactMatch && <ContactWorkspace key={contactRequest.id} request={contactRequest} fishName={contactMatch.name} busy={busyId === contactRequest.id} onClose={() => setContactRequestId(null)} onUpdateStatus={(status) => updateStatus(contactRequest, status)} onCreateOrderDraft={() => { setContactRequestId(null); setDraftRequestId(contactRequest.id); }} />}
+    {draftRequest && draftMatch && <OrderDraftWorkspace key={draftRequest.id} request={draftRequest} fishName={draftMatch.name} products={products} variants={variants} onClose={() => setDraftRequestId(null)} />}
   </main>;
 }
 
