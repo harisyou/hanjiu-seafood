@@ -10,6 +10,7 @@ export type Product = {
   featured: boolean;
   sort_order: number;
   processing_enabled?: boolean;
+  fish_catalog_id?: string | null;
 };
 
 export type ProductVariant = {

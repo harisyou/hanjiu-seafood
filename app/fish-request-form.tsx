@@ -1,16 +1,17 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { isValidEmail, isValidTaiwanMobile, normalizeTaiwanMobile, taipeiToday, validateTaipeiDateTime } from "@/lib/customer-validation";
+import { FishCatalogItem } from "@/lib/fish-catalog";
 
 type RequestForm = {
-  fishName: string; quantity: string; size: string; budget: string; wantedBy: string;
+  fishCatalogId: string; fishName: string; quantity: string; size: string; budget: string; wantedBy: string;
   purpose: string; customerName: string; phone: string; email: string;
   channel: "line" | "email" | "phone"; note: string;
 };
 
-const initialForm: RequestForm = { fishName: "", quantity: "", size: "", budget: "", wantedBy: "", purpose: "", customerName: "", phone: "", email: "", channel: "phone", note: "" };
+const initialForm: RequestForm = { fishCatalogId: "", fishName: "", quantity: "", size: "", budget: "", wantedBy: "", purpose: "", customerName: "", phone: "", email: "", channel: "phone", note: "" };
 
 export default function FishRequestForm() {
   const supabase = useMemo(() => createClient(), []);
@@ -18,11 +19,19 @@ export default function FishRequestForm() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);
+  const [catalog, setCatalog] = useState<FishCatalogItem[]>([]);
+
+  useEffect(() => {
+    supabase.from("fish_catalog").select("id,name,sort_order").order("sort_order").order("name").then(({ data }) => {
+      setCatalog((data || []) as FishCatalogItem[]);
+    });
+  }, [supabase]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (submitting) return;
-    if (!form.fishName.trim() || !form.quantity.trim() || !form.customerName.trim() || !form.phone.trim()) {
+    const isOtherFish = form.fishCatalogId === "other";
+    if (!form.fishCatalogId || (isOtherFish && !form.fishName.trim()) || !form.quantity.trim() || !form.customerName.trim() || !form.phone.trim()) {
       setMessage("請填寫想找的魚、需求量、姓名與手機號碼。");
       return;
     }
@@ -40,7 +49,8 @@ export default function FishRequestForm() {
     setSubmitting(true); setMessage("");
     const { data, error } = await supabase.rpc("create_fish_request", {
       p_customer_name: form.customerName, p_phone: normalizedPhone, p_email: form.email || null,
-      p_fish_name: form.fishName, p_quantity_request: form.quantity,
+      p_fish_name: isOtherFish ? form.fishName : "", p_fish_catalog_id: isOtherFish ? null : form.fishCatalogId,
+      p_quantity_request: form.quantity,
       p_size_preference: form.size || null, p_budget: form.budget || null,
       p_wanted_by: form.wantedBy || null, p_purpose: form.purpose || null,
       p_note: form.note || null, p_preferred_notification_channel: form.channel
@@ -48,7 +58,7 @@ export default function FishRequestForm() {
     setSubmitting(false);
     if (error || !data) {
       console.error("Fish request submission failed", error);
-      setMessage(error?.message.includes("wanted_by_in_past") ? "希望日期不能早於今天" : "需求送出失敗，請稍後再試。\n也可以直接透過 LINE 與韓九聯絡。");
+      setMessage(error?.message.includes("wanted_by_in_past") ? "希望日期不能早於今天" : error?.message.includes("fish_catalog_unavailable") ? "這個魚種目前無法選擇，請重新選擇。" : "需求送出失敗，請稍後再試。\n也可以直接透過 LINE 與韓九聯絡。");
       return;
     }
     setSuccess(true); setForm(initialForm);
@@ -58,7 +68,8 @@ export default function FishRequestForm() {
 
   return <form className="fishRequestForm" onSubmit={submit} noValidate>
     <div className="fishRequestFields">
-      <label>想找的魚 *<input required placeholder="例如：馬頭、赤鯮" value={form.fishName} onChange={(event) => setForm({ ...form, fishName: event.target.value })} /></label>
+      <label>想找的魚 *<select required value={form.fishCatalogId} onChange={(event) => setForm({ ...form, fishCatalogId: event.target.value, fishName: event.target.value === "other" ? form.fishName : "" })}><option value="">請選擇魚種</option>{catalog.map((fish) => <option key={fish.id} value={fish.id}>{fish.name}</option>)}<option value="other">其他（選單沒有）</option></select></label>
+      {form.fishCatalogId === "other" && <label>請輸入想找的魚 *<input required placeholder="例如：深海紅魚或地方俗名" value={form.fishName} onChange={(event) => setForm({ ...form, fishName: event.target.value })} /></label>}
       <label>數量／需求量 *<input required placeholder="例如：2尾、3斤、大約5人份" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
       <label>希望尺寸<input placeholder="例如：大尾一點、約1斤左右" value={form.size} onChange={(event) => setForm({ ...form, size: event.target.value })} /></label>
       <label>預算<input placeholder="例如：每尾 500 左右" value={form.budget} onChange={(event) => setForm({ ...form, budget: event.target.value })} /></label>
