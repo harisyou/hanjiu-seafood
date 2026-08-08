@@ -573,6 +573,12 @@ export default function HomePage() {
     }
     const text = ["海鮮訂購單", `姓名：${normalizedForm.customer_name}`, `電話：${normalizedPhone}`, "", ...cart.map((item) => { const processing = summarizedProcessing(item); return `${item.product_name}｜${item.variant_name}｜${formatPrice(item.price)} × ${item.quantity}\n處理：${processing.name}${processing.extras.map((name) => `\n＋${name}`).join("")}${item.processing_note ? `\n備註：${item.processing_note}` : ""}`; }), "", `配送方式：${displayDeliveryMethod(form.fulfillment)}`, deliveryDetails].filter(Boolean).join("\n");
     try { await navigator.clipboard.writeText(text); } catch { /* Clipboard permission is optional. */ }
+    const purchasedByVariant = new Map<string, number>();
+    cart.forEach((item) => purchasedByVariant.set(item.variant_id, (purchasedByVariant.get(item.variant_id) || 0) + item.quantity));
+    setVariants((current) => current.map((variant) => ({
+      ...variant,
+      inventory: Math.max(0, variant.inventory - (purchasedByVariant.get(variant.id) || 0))
+    })));
     setCart([]);
     setNotice("訂單已送出");
     setIsSubmitting(false);
@@ -608,7 +614,8 @@ export default function HomePage() {
         <div className="grid">
           {products.map((product) => {
             const productVariants = variants.filter((variant) => variant.product_id === product.id);
-            const purchasableVariants = productVariants.filter((variant) => getPurchaseLimit(variant) > 0 && product.status === "available");
+            const displayVariants = productVariants.filter((variant) => variant.active);
+            const purchasableVariants = displayVariants.filter((variant) => getPurchaseLimit(variant) > 0 && product.status === "available");
             const selectedVariant = purchasableVariants.find((variant) => variant.id === selectedVariants[product.id]);
             const selectedQuantity = selectedQuantities[product.id] || 1;
             const remainingPurchasable = selectedVariant ? getRemainingPurchasable(selectedVariant, cart) : 0;
@@ -632,13 +639,17 @@ export default function HomePage() {
                     : "加入購物車";
             return <article className="card" key={product.id}>
               <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span>🦀</span>}{product.featured && <b>本日精選</b>}</div>
-              <div className="body"><small>{product.status === "available" ? "今日供應" : "已售完"}</small><h3>{product.name}</h3><p>{product.description}</p><p>料理建議：{product.cooking || "歡迎詢問"}</p>
-                {purchasableVariants.length > 0 && <div className="variantSelector">
+              <div className="body"><small>{soldOut ? "已售完" : "今日供應"}</small><h3>{product.name}</h3><p>{product.description}</p><p>料理建議：{product.cooking || "歡迎詢問"}</p>
+                {displayVariants.length > 0 && <div className="variantSelector">
                   <label htmlFor={`variant-${product.id}`}>選擇規格</label>
                   <select id={`variant-${product.id}`} value={selectedVariants[product.id] || ""} onChange={(event) => selectVariant(product.id, event.target.value)}>
                     <option value="" disabled>請選擇規格</option>
-                    {purchasableVariants.map((variant) => <option value={variant.id} key={variant.id}>{variant.name}｜{formatPrice(variant.price)}</option>)}
+                    {displayVariants.map((variant) => {
+                      const unavailable = product.status !== "available" || variant.inventory <= 0;
+                      return <option value={variant.id} disabled={unavailable} key={variant.id}>{variant.name}｜{formatPrice(variant.price)}{unavailable ? "｜已售完" : ""}</option>;
+                    })}
                   </select>
+                  <p className="weightBasisNotice">重量皆以魚貨處理前秤重為準，去鱗、去鰓、去內臟等處理後，實際收到重量會減少。</p>
                   {selectedVariant && <>
                     <div className="variantDetails">
                       <div><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>

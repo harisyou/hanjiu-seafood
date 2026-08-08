@@ -6,7 +6,7 @@ export type InventoryFilter = "all" | "selling" | "sold_out" | "hidden";
 export function validateInventoryValues(name: string, price: number, inventory: number) {
   if (!name.trim()) return "規格名稱不可空白。";
   if (!Number.isInteger(price) || price < 0) return "價格必須是大於或等於 0 的整數。";
-  if (!Number.isInteger(inventory) || inventory < 0) return "庫存必須是大於或等於 0 的整數。";
+  if (!Number.isInteger(inventory) || inventory < 0) return "剩餘尾數必須是大於或等於 0 的整數。";
   return "";
 }
 
