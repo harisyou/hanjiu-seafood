@@ -4,6 +4,7 @@ export type PaymentStatus = "unpaid" | "paid";
 export type AdminOrderItem = {
   id: string;
   order_id: string;
+  product_id: string | null;
   product_name: string;
   variant_name: string | null;
   quantity: number;
