@@ -8,7 +8,7 @@ import { FishRequest } from "@/lib/fish-requests";
 import { FishCatalogItem } from "@/lib/fish-catalog";
 import { buildFishMatchGroups } from "@/lib/fish-matching";
 
-type Order = { id: string; customer_name: string; phone: string; fulfillment: string; processing: string; note: string | null; status: string; created_at: string };
+type Order = { id: string; customer_name: string; phone: string; fulfillment: string | null; processing: string | null; note: string | null; status: string; created_at: string };
 type OrderItem = { id: string; order_id: string; product_name: string; variant_name: string | null; quantity: number; processing_preset_name: string | null; processing_option_names: string[]; processing_note: string | null };
 const blank = { name: "", description: "", cooking: "", status: "available" as Product["status"], featured: false, sort_order: 100 };
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -73,7 +73,7 @@ export default function AdminPage() {
     if (productResult.error) setNotice(`商品載入失敗：${productResult.error.message}`);
     else setProducts((productResult.data || []) as Product[]);
     if (orderResult.error) setNotice(`訂單載入失敗：${orderResult.error.message}`);
-    else setOrders((orderResult.data || []) as Order[]);
+    else setOrders(((orderResult.data || []) as Order[]).filter((order) => order.status !== "draft"));
     if (!orderItemResult.error) setOrderItems((orderItemResult.data || []) as OrderItem[]);
     if (!productResult.error && !variantResult.error && !requestResult.error && !catalogResult.error) {
       const groups = buildFishMatchGroups((productResult.data || []) as Product[], (variantResult.data || []) as ProductVariant[], (requestResult.data || []) as FishRequest[], (catalogResult.data || []) as FishCatalogItem[]);
