@@ -30,6 +30,6 @@ test("dirty state enables one manual save and clears after success", () => {
 
 test("mark sold out remains an immediate single-field database update", () => {
   assert.match(inventoryPage, /async function markSoldOut/);
-  assert.match(inventoryPage, /\.update\(\{ inventory: 0 \}\)\.eq\("id", variant\.id\)/);
+  assert.match(inventoryPage, /supabase\.rpc\("admin_adjust_inventory_variant"/);
   assert.match(inventoryPage, />標記售完<\/button>/);
 });

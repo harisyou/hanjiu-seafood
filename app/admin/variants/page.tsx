@@ -55,17 +55,10 @@ export default function ProductVariantsPage() {
     event.preventDefault();
     if (!productId || !form.name.trim()) return;
 
-    const payload = {
-      product_id: productId,
-      name: form.name.trim(),
-      price: Math.max(0, Math.round(form.price)),
-      inventory: Math.max(0, Math.round(form.inventory)),
-      active: form.active,
-      sort_order: Math.round(form.sort_order)
-    };
+    const payload = { name: form.name.trim(), price: Math.max(0, Math.round(form.price)), inventory: Math.max(0, Math.round(form.inventory)), active: form.active, sort_order: Math.round(form.sort_order) };
     const result = editingId
-      ? await supabase.from("product_variants").update(payload).eq("id", editingId)
-      : await supabase.from("product_variants").insert(payload);
+      ? await supabase.rpc("admin_update_inventory_variant", { p_variant_id: editingId, p_name: payload.name, p_price: payload.price, p_inventory: payload.inventory, p_active: payload.active, p_sort_order: payload.sort_order })
+      : await supabase.rpc("admin_create_inventory_variant", { p_product_id: productId, p_name: payload.name, p_price: payload.price, p_inventory: payload.inventory, p_active: payload.active, p_sort_order: payload.sort_order });
 
     if (result.error) setNotice(`儲存失敗：${result.error.message}`);
     else {
@@ -89,7 +82,7 @@ export default function ProductVariantsPage() {
 
   async function removeVariant(variant: ProductVariant) {
     if (!confirm(`確定下架規格「${variant.name}」？歷史訂單資料不會受影響。`)) return;
-    const { error } = await supabase.from("product_variants").update({ active: false }).eq("id", variant.id);
+    const { error } = await supabase.rpc("admin_update_inventory_variant", { p_variant_id: variant.id, p_name: variant.name, p_price: variant.price, p_inventory: variant.inventory, p_active: false, p_sort_order: variant.sort_order });
     if (error) setNotice(`下架失敗：${error.message}`);
     else {
       setNotice("規格已下架。");
