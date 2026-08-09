@@ -4,6 +4,7 @@ import test from "node:test";
 
 const migration = readFileSync(new URL("../supabase/f003-10-draft-order-confirmation.sql", import.meta.url), "utf8");
 const detailPage = readFileSync(new URL("../app/admin/orders/[id]/page.tsx", import.meta.url), "utf8");
+const requestDetailPage = readFileSync(new URL("../app/admin/requests/[id]/page.tsx", import.meta.url), "utf8");
 
 test("save draft metadata is admin-only and cannot change the draft status", () => {
   assert.match(migration, /create or replace function public\.admin_save_fish_request_order_draft_metadata/);
@@ -65,4 +66,12 @@ test("draft detail UI saves metadata before showing a confirmation summary", () 
   assert.match(detailPage, /確認後將正式扣除庫存，並把魚貨需求標記為已完成/);
   assert.match(detailPage, /disabled=\{busy \|\| !canConfirm\}/);
   assert.match(detailPage, /訂單已確認，庫存已扣除/);
+});
+
+test("fish request detail only links an existing draft order without mutating business data", () => {
+  assert.match(requestDetailPage, /from\("orders"\)\.select\("id"\)\.eq\("fish_request_id", params\.id\)\.eq\("status", "draft"\)\.maybeSingle\(\)/);
+  assert.match(requestDetailPage, /查看訂單草稿/);
+  assert.match(requestDetailPage, /href=\{"\/admin\/orders\/" \+ draftOrderId\}/);
+  const draftLookup = requestDetailPage.slice(requestDetailPage.indexOf('supabase.from("orders").select("id")'));
+  assert.doesNotMatch(draftLookup.slice(0, draftLookup.indexOf("]);")), /\.(insert|update|delete)\(/);
 });

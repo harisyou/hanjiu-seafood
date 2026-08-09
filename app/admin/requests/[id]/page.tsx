@@ -14,16 +14,23 @@ export default function AdminRequestDetailPage() {
   const [authReady, setAuthReady] = useState(false);
   const [request, setRequest] = useState<FishRequest | null>(null);
   const [catalog, setCatalog] = useState<FishCatalogItem[]>([]);
+  const [draftOrderId, setDraftOrderId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   const loadRequest = useCallback(async () => {
-    const [requestResult, catalogResult] = await Promise.all([
+    const [requestResult, catalogResult, draftOrderResult] = await Promise.all([
       supabase.from("fish_requests").select("*").eq("id", params.id).single(),
-      supabase.from("fish_catalog").select("*").order("sort_order").order("name")
+      supabase.from("fish_catalog").select("*").order("sort_order").order("name"),
+      supabase.from("orders").select("id").eq("fish_request_id", params.id).eq("status", "draft").maybeSingle()
     ]);
     if (requestResult.error || !requestResult.data || catalogResult.error) setNotice("找不到需求，或目前沒有讀取權限。");
-    else { setRequest(requestResult.data as FishRequest); setCatalog((catalogResult.data || []) as FishCatalogItem[]); }
+    else {
+      setRequest(requestResult.data as FishRequest);
+      setCatalog((catalogResult.data || []) as FishCatalogItem[]);
+      setDraftOrderId(draftOrderResult.data?.id || null);
+      if (draftOrderResult.error) setNotice("訂單草稿讀取失敗，請稍後再試。");
+    }
   }, [params.id, supabase]);
 
   useEffect(() => { supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user.email || null); setAuthReady(true); if (data.session) loadRequest(); }); }, [loadRequest, supabase]);
@@ -51,7 +58,7 @@ export default function AdminRequestDetailPage() {
   if (!request) return <main className="admin"><section className="panel centeredNotice"><Link href="/admin/requests">← 返回需求</Link><p>{notice || "載入需求中…"}</p></section></main>;
 
   const classifiedFish = catalog.find((fish) => fish.id === request.fish_catalog_id);
-  return <main className="admin requestDetailPage"><header className="adminTop ordersTop"><div><Link href="/admin/requests">← 返回想找的魚</Link><h1>🔔 {request.fish_name}</h1><p>建立於 {new Intl.DateTimeFormat("zh-TW", { dateStyle: "medium", timeStyle: "short" }).format(new Date(request.created_at))}</p></div><span className={`requestStatus status-${request.status}`}>{fishRequestStatusLabel(request.status)}</span></header><section className="requestDetailGrid">
+  return <main className="admin requestDetailPage"><header className="adminTop ordersTop"><div><Link href="/admin/requests">← 返回想找的魚</Link><h1>🔔 {request.fish_name}</h1><p>建立於 {new Intl.DateTimeFormat("zh-TW", { dateStyle: "medium", timeStyle: "short" }).format(new Date(request.created_at))}</p></div><div className="requestHeaderActions">{draftOrderId && <Link className="buttonLink" href={"/admin/orders/" + draftOrderId}>查看訂單草稿</Link>}<span className={`requestStatus status-${request.status}`}>{fishRequestStatusLabel(request.status)}</span></div></header><section className="requestDetailGrid">
     <article className="panel requestDetailCard"><h2>魚貨需求</h2><dl><div><dt>原始輸入／名稱快照</dt><dd>{request.fish_name}</dd></div><div><dt>歸類魚種</dt><dd>{classifiedFish?.name || "尚未歸類"}</dd></div><div><dt>數量</dt><dd>{request.quantity_request}</dd></div><div><dt>尺寸</dt><dd>{request.size_preference || "未指定"}</dd></div><div><dt>預算</dt><dd>{request.budget || "未指定"}</dd></div><div><dt>希望日期</dt><dd>{formatWantedBy(request.wanted_by)}</dd></div><div><dt>用途</dt><dd>{request.purpose || "未指定"}</dd></div></dl><label className="requestClassify">歸類魚種<select disabled={busy} value={request.fish_catalog_id || ""} onChange={(event) => classifyFish(event.target.value)}><option value="">尚未歸類</option>{catalog.filter((fish) => fish.active || fish.id === request.fish_catalog_id).map((fish) => <option key={fish.id} value={fish.id}>{fish.name}{fish.active ? "" : "（已停用）"}</option>)}</select></label><small>人工歸類只更新 fish_catalog_id，不會修改客戶原始輸入。</small></article>
     <article className="panel requestDetailCard"><h2>客戶與聯絡</h2><dl><div><dt>姓名</dt><dd>{request.customer_name}</dd></div><div><dt>電話</dt><dd><a href={`tel:${request.phone}`}>{request.phone}</a></dd></div><div><dt>Email</dt><dd>{request.email ? <a href={`mailto:${request.email}`}>{request.email}</a> : "未提供"}</dd></div><div><dt>LINE</dt><dd>{request.line_user_id ? "LINE 可通知" : "LINE 尚未綁定"}</dd></div><div><dt>偏好通知</dt><dd>{notificationLabel(request)}</dd></div></dl><div className="quickContact"><a className="buttonLink" href={`tel:${request.phone}`}>撥打電話</a>{request.email && <a className="buttonLink secondaryAdminAction" href={`mailto:${request.email}`}>寄 Email</a>}{request.customer_id && <Link className="buttonLink secondaryAdminAction" href={`/admin/customers/${request.customer_id}`}>查看客戶</Link>}</div></article>
     <article className="panel requestDetailCard"><h2>其他需求</h2><p className="requestLongNote">{request.note || "沒有其他需求"}</p></article>
