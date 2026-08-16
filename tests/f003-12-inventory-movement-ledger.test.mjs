@@ -41,6 +41,8 @@ test("Phase A leaves legacy direct product variant writes available while RPC pa
   assert.match(phaseA, /admin_adjust_inventory_variant[\s\S]*is_hanjiu_admin/);
   assert.match(phaseA, /admin_create_inventory_variant[\s\S]*is_hanjiu_admin/);
   assert.match(phaseA, /admin_update_inventory_variant[\s\S]*is_hanjiu_admin/);
+  assert.match(phaseA, /create or replace function public\.admin_update_inventory_variants[\s\S]*set_config\('app\.inventory_movement_type', 'admin_adjustment', true\)/);
+  assert.match(phaseA, /create or replace function public\.admin_create_inventory_product[\s\S]*set_config\('app\.inventory_movement_type', 'admin_adjustment', true\)/);
   assert.match(phaseA, /security definer set search_path = public, pg_temp/);
 });
 

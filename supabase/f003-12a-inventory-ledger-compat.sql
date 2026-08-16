@@ -148,6 +148,51 @@ revoke all on function public.admin_confirm_fish_request_order_draft(uuid) from 
 grant execute on function public.admin_confirm_fish_request_order_draft(uuid) to authenticated;
 
 -- Admin RPCs set explicit local context. Existing direct writes remain compatible in Phase A and default to admin_adjustment.
+create or replace function public.admin_update_inventory_variants(p_product_id uuid, p_variants jsonb)
+returns integer language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_item jsonb; v_variant_id uuid; v_variant_name text; v_price bigint; v_inventory bigint; v_seen_ids uuid[] := '{}'; v_expected integer; v_updated integer;
+begin
+  if not public.is_hanjiu_admin() then raise exception 'admin_required'; end if;
+  if p_product_id is null then raise exception 'product_id_required'; end if;
+  if jsonb_typeof(p_variants) is distinct from 'array' or jsonb_array_length(p_variants) = 0 then raise exception 'variants_required'; end if;
+  if jsonb_array_length(p_variants) > 200 then raise exception 'too_many_variants'; end if;
+  v_expected := jsonb_array_length(p_variants);
+  for v_item in select value from jsonb_array_elements(p_variants) loop
+    if jsonb_typeof(v_item) is distinct from 'object' then raise exception 'invalid_variant'; end if;
+    if (v_item->>'id') is null or (v_item->>'id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then raise exception 'invalid_variant_id'; end if;
+    v_variant_id := (v_item->>'id')::uuid; if v_variant_id = any(v_seen_ids) then raise exception 'duplicate_variant_id'; end if; v_seen_ids := array_append(v_seen_ids, v_variant_id);
+    if jsonb_typeof(v_item->'name') is distinct from 'string' then raise exception 'variant_name_required'; end if;
+    v_variant_name := btrim(v_item->>'name'); if v_variant_name = '' or length(v_variant_name) > 120 then raise exception 'variant_name_required'; end if;
+    if jsonb_typeof(v_item->'price') is distinct from 'number' or (v_item->>'price') !~ '^-?[0-9]+$' then raise exception 'invalid_price'; end if;
+    v_price := (v_item->>'price')::bigint; if v_price < 0 or v_price > 2147483647 then raise exception 'invalid_price'; end if;
+    if jsonb_typeof(v_item->'inventory') is distinct from 'number' or (v_item->>'inventory') !~ '^-?[0-9]+$' then raise exception 'invalid_inventory'; end if;
+    v_inventory := (v_item->>'inventory')::bigint; if v_inventory < 0 or v_inventory > 2147483647 then raise exception 'invalid_inventory'; end if;
+    if jsonb_typeof(v_item->'active') is distinct from 'boolean' then raise exception 'invalid_active'; end if;
+    if not exists (select 1 from public.product_variants where id = v_variant_id and product_id = p_product_id) then raise exception 'variant_product_mismatch'; end if;
+  end loop;
+  perform set_config('app.inventory_movement_type', 'admin_adjustment', true);
+  with payload as (select id, btrim(name) as name, price, inventory, active from jsonb_to_recordset(p_variants) as item(id uuid, name text, price integer, inventory integer, active boolean))
+  update public.product_variants variant set name = payload.name, price = payload.price, inventory = payload.inventory, active = payload.active from payload where variant.id = payload.id and variant.product_id = p_product_id;
+  get diagnostics v_updated = row_count; if v_updated <> v_expected then raise exception 'batch_update_incomplete'; end if; return v_updated;
+end;
+$$;
+create or replace function public.admin_create_inventory_product(p_product_name text, p_processing_enabled boolean, p_product_status text, p_variant_name text, p_price integer, p_inventory integer, p_variant_active boolean)
+returns uuid language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_product_id uuid;
+begin
+  if not public.is_hanjiu_admin() then raise exception 'admin_required'; end if;
+  if nullif(btrim(p_product_name), '') is null then raise exception 'product_name_required'; end if;
+  if nullif(btrim(p_variant_name), '') is null then raise exception 'variant_name_required'; end if;
+  if length(btrim(p_product_name)) > 120 or length(btrim(p_variant_name)) > 120 then raise exception 'invalid_length'; end if;
+  if p_product_status is null or p_product_status not in ('available', 'sold_out', 'hidden') then raise exception 'invalid_product_status'; end if;
+  if p_price is null or p_price < 0 then raise exception 'invalid_price'; end if;
+  if p_inventory is null or p_inventory < 0 then raise exception 'invalid_inventory'; end if;
+  insert into public.products (name, status, processing_enabled) values (btrim(p_product_name), p_product_status, coalesce(p_processing_enabled, false)) returning id into v_product_id;
+  perform set_config('app.inventory_movement_type', 'admin_adjustment', true);
+  insert into public.product_variants (product_id, name, price, inventory, active) values (v_product_id, btrim(p_variant_name), p_price, p_inventory, coalesce(p_variant_active, true));
+  return v_product_id;
+end;
+$$;
 create or replace function public.admin_adjust_inventory_variant(p_variant_id uuid, p_inventory integer)
 returns public.product_variants language plpgsql security definer set search_path = public, pg_temp as $$
 declare v_variant public.product_variants;
@@ -164,9 +209,13 @@ declare v_variant public.product_variants;
 begin if not public.is_hanjiu_admin() then raise exception 'admin_required'; end if; if p_variant_id is null then raise exception 'variant_not_found'; end if; if nullif(btrim(p_name), '') is null or length(btrim(p_name)) > 120 then raise exception 'variant_name_required'; end if; if p_price is null or p_price < 0 then raise exception 'invalid_price'; end if; if p_inventory is null or p_inventory < 0 then raise exception 'invalid_inventory'; end if; if p_sort_order is null then raise exception 'invalid_sort_order'; end if; perform set_config('app.inventory_movement_type', 'admin_adjustment', true); update public.product_variants set name = btrim(p_name), price = p_price, inventory = p_inventory, active = coalesce(p_active, true), sort_order = p_sort_order where id = p_variant_id returning * into v_variant; if not found then raise exception 'variant_not_found'; end if; return v_variant; end;
 $$;
 revoke all on function public.log_inventory_movement() from public, anon, authenticated;
+revoke all on function public.admin_update_inventory_variants(uuid, jsonb) from public, anon, authenticated;
+revoke all on function public.admin_create_inventory_product(text, boolean, text, text, integer, integer, boolean) from public, anon, authenticated;
 revoke all on function public.admin_adjust_inventory_variant(uuid, integer) from public, anon, authenticated;
 revoke all on function public.admin_create_inventory_variant(uuid, text, integer, integer, boolean, integer) from public, anon, authenticated;
 revoke all on function public.admin_update_inventory_variant(uuid, text, integer, integer, boolean, integer) from public, anon, authenticated;
 grant execute on function public.admin_adjust_inventory_variant(uuid, integer) to authenticated;
+grant execute on function public.admin_update_inventory_variants(uuid, jsonb) to authenticated;
+grant execute on function public.admin_create_inventory_product(text, boolean, text, text, integer, integer, boolean) to authenticated;
 grant execute on function public.admin_create_inventory_variant(uuid, text, integer, integer, boolean, integer) to authenticated;
 grant execute on function public.admin_update_inventory_variant(uuid, text, integer, integer, boolean, integer) to authenticated;
