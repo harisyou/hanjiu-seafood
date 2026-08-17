@@ -9,6 +9,8 @@ const variantsPage = readFileSync(new URL("../app/admin/variants/page.tsx", impo
 const detailPage = readFileSync(new URL("../app/admin/inventory/[id]/page.tsx", import.meta.url), "utf8");
 
 test("Phase A creates the ledger with RLS and append-only client permissions", () => {
+  assert.match(phaseA, /^--[^]*?\bbegin;\s*\n\s*create table if not exists public\.inventory_movements/i);
+  assert.match(phaseA, /grant execute on function public\.admin_update_inventory_variant\(uuid, text, integer, integer, boolean, integer\) to authenticated;\s*\n\s*commit;\s*$/i);
   assert.match(phaseA, /create table if not exists public\.inventory_movements/);
   assert.match(phaseA, /check \(quantity_after - quantity_before = inventory_delta\)/);
   assert.match(phaseA, /alter table public\.inventory_movements enable row level security/);

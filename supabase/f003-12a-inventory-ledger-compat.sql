@@ -1,6 +1,8 @@
 -- F003-12 Phase A: compatibility migration. Run before deploying the new UI.
 -- It intentionally preserves legacy product_variants INSERT/UPDATE grants.
 
+begin;
+
 create table if not exists public.inventory_movements (
   id uuid primary key default gen_random_uuid(),
   variant_id uuid not null references public.product_variants(id) on delete restrict,
@@ -219,3 +221,5 @@ grant execute on function public.admin_update_inventory_variants(uuid, jsonb) to
 grant execute on function public.admin_create_inventory_product(text, boolean, text, text, integer, integer, boolean) to authenticated;
 grant execute on function public.admin_create_inventory_variant(uuid, text, integer, integer, boolean, integer) to authenticated;
 grant execute on function public.admin_update_inventory_variant(uuid, text, integer, integer, boolean, integer) to authenticated;
+
+commit;
