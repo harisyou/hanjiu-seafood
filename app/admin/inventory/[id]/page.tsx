@@ -47,7 +47,10 @@ export default function InventoryProductDetailPage() {
     const validation = validateInventoryValues(newVariant.name, newVariant.price, newVariant.inventory);
     if (validation) return setNotice(validation);
     setBusy(true);
-    const { error } = await supabase.from("product_variants").insert({ ...newVariant, name: newVariant.name.trim(), product_id: id });
+    const { error } = await supabase.rpc("admin_create_inventory_variant", {
+      p_product_id: id, p_name: newVariant.name.trim(), p_price: newVariant.price,
+      p_inventory: newVariant.inventory, p_active: newVariant.active, p_sort_order: newVariant.sort_order
+    });
     setBusy(false);
     if (error) setNotice("新增規格失敗。"); else { setNotice("規格已新增。"); setNewVariant(blankVariant); await load(); }
   }
