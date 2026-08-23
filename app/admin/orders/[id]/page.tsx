@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { AdminOrder, AdminOrderItem, formatOrderTime, orderStatusLabel, orderStatusOptions, orderTotal, parseOrderNote, PaymentStatus, paymentStatusLabel, processingSummary } from "@/lib/admin-orders";
+import { AdminOrder, AdminOrderItem, formatOrderTime, orderStatusLabel, orderStatusOptions, orderSubtotal, orderTotal, parseOrderNote, PaymentStatus, paymentStatusLabel, processingSummary } from "@/lib/admin-orders";
 import { FishRequest, fishRequestStatusLabel, formatWantedBy } from "@/lib/fish-requests";
 
 type ProcessingPreset = { id: string; name: string; active: boolean };
@@ -41,7 +41,11 @@ function errorMessage(message: string) {
     order_inventory_provenance_missing: "找不到此訂單原始扣庫存紀錄，為避免錯誤補庫存，請改由人工處理。",
     order_already_restored: "此訂單已有補庫存紀錄，請重新載入。",
     order_cancellation_rpc_required: "請使用取消訂單功能，系統會安全補回庫存。",
-    order_cancelled_terminal: "已取消的訂單不能恢復為其他狀態。"
+    order_cancelled_terminal: "已取消的訂單不能恢復為其他狀態。",
+    invalid_shipping_fee: "運費必須是大於或等於 0 的整數金額。",
+    invalid_discount_amount: "折扣必須是大於或等於 0 的整數金額。",
+    cancelled_order_totals_locked: "已取消訂單的金額 snapshot 不能再修改。",
+    order_totals_snapshot_missing: "此歷史訂單尚無金額 snapshot，不能進行調整。"
   };
   return Object.entries(messages).find(([code]) => message.includes(code))?.[1] || "操作失敗，請稍後再試。";
 }
@@ -65,12 +69,16 @@ export default function AdminOrderDetailPage() {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [shippingFee, setShippingFee] = useState("0");
+  const [discountAmount, setDiscountAmount] = useState("0");
 
   const loadOrder = useCallback(async () => {
     const { data, error } = await supabase.from("orders").select("*,order_items(*)").eq("id", orderId).single();
     if (error || !data) { setNotice("找不到訂單，或目前沒有讀取權限。"); return; }
     const nextOrder = data as AdminOrder;
     setOrder(nextOrder);
+    setShippingFee(String(nextOrder.shipping_fee ?? 0));
+    setDiscountAmount(String(nextOrder.discount_amount ?? 0));
     setSourceRequest(null); setSourceFishName(""); setSourceRequestUnavailable(false);
     if (nextOrder.fish_request_id) {
       const requestResult = await supabase.from("fish_requests").select("*").eq("id", nextOrder.fish_request_id).maybeSingle();
@@ -169,6 +177,17 @@ export default function AdminOrderDetailPage() {
     else { setNotice("訂單已取消，庫存已補回，並已寫入庫存異動紀錄。"); await loadOrder(); }
   }
 
+  async function saveOrderTotals() {
+    if (!order || busy) return;
+    const nextShippingFee = Number(shippingFee), nextDiscountAmount = Number(discountAmount);
+    if (!Number.isInteger(nextShippingFee) || nextShippingFee < 0 || !Number.isInteger(nextDiscountAmount) || nextDiscountAmount < 0) { setNotice("運費與折扣必須是大於或等於 0 的整數金額。"); return; }
+    setBusy(true); setNotice("");
+    const { error } = await supabase.rpc("admin_update_order_totals", { p_order_id: order.id, p_shipping_fee: nextShippingFee, p_discount_amount: nextDiscountAmount });
+    setBusy(false);
+    if (error) setNotice(errorMessage(error.message));
+    else { setNotice("運費、折扣與應收總額已更新。"); await loadOrder(); }
+  }
+
   if (!authReady) return <main className="admin"><section className="panel centeredNotice">驗證管理員身分中…</section></main>;
   if (!user) return <main className="admin"><section className="panel centeredNotice"><h1>此頁僅限管理員</h1><Link className="buttonLink" href="/admin">前往登入</Link></section></main>;
   if (!order) return <main className="admin"><section className="panel centeredNotice"><Link href="/admin/orders">← 返回訂單</Link><p>{notice || "載入訂單中…"}</p></section></main>;
@@ -178,6 +197,7 @@ export default function AdminOrderDetailPage() {
   const isDraft = order.status === "draft";
   const isCancelled = order.status === "cancelled";
   const canCancel = !isDraft && !isCancelled;
+  const hasTotalsSnapshot = order.subtotal !== null && order.subtotal !== undefined;
   const editableOrderStatusOptions = orderStatusOptions.filter((option) => option.value !== "cancelled");
   const canConfirm = Boolean(order.fulfillment && order.processing && item && order.order_items.length === 1);
   const selectedPreset = presets.find((preset) => preset.id === draftForm.presetId);
@@ -189,8 +209,9 @@ export default function AdminOrderDetailPage() {
     {isDraft && <section className="panel draftCompletionPanel"><header><div><small>F003-10</small><h2>完成訂單資料</h2><p>儲存草稿不會扣庫存；只有確認正式訂單才會扣除庫存並完成來源需求。</p></div><span>草稿</span></header><div className="draftCompletionFields"><label>配送方式 *<select value={draftForm.fulfillment} disabled={busy} onChange={(event) => setDraftForm((current) => ({ ...current, fulfillment: event.target.value }))}><option value="">請選擇配送方式</option>{fulfillmentOptions.map((value) => <option value={value} key={value}>{deliveryLabel(value)}</option>)}</select></label><label>處理方式 <select value={draftForm.presetId} disabled={busy || productConfig?.processing_enabled === false} onChange={(event) => changePreset(event.target.value)}><option value="">不處理</option>{presets.map((preset) => <option value={preset.id} key={preset.id}>{preset.name}</option>)}</select></label>{productConfig?.processing_enabled ? <fieldset className="draftProcessingOptions"><legend>處理項目</legend>{options.map((option) => <label className="check" key={option.id}><input type="checkbox" checked={draftForm.optionIds.includes(option.id)} disabled={busy} onChange={() => toggleOption(option.id)} />{option.name}</label>)}</fieldset> : <p className="draftNoProcessing">此商品不提供處理方式，將使用既有「不處理」設定。</p>}<label className="draftWide">其他處理需求<textarea rows={3} maxLength={500} value={draftForm.processingNote} disabled={busy || productConfig?.processing_enabled === false} onChange={(event) => setDraftForm((current) => ({ ...current, processingNote: event.target.value }))} /></label><label className="draftWide">訂單備註<textarea rows={3} value={draftForm.note} disabled={busy} onChange={(event) => setDraftForm((current) => ({ ...current, note: event.target.value }))} /></label></div><div className="draftCompletionActions"><button type="button" className="secondaryAdminAction" disabled={busy} onClick={saveDraft}>{busy ? "儲存中…" : "儲存草稿"}</button><button type="button" disabled={busy || !canConfirm} onClick={() => setConfirming(true)}>{!canConfirm ? "請先儲存完整資料" : "確認正式訂單"}</button></div>{confirming && item && <section className="draftConfirmSummary" aria-live="polite"><h3>確認正式訂單</h3><dl><div><dt>客戶</dt><dd>{order.customer_name}</dd></div><div><dt>商品</dt><dd>{item.product_name}</dd></div><div><dt>規格</dt><dd>{item.variant_name || "未指定"}</dd></div><div><dt>數量</dt><dd>{item.quantity}</dd></div><div><dt>單價</dt><dd>{(item.price || 0).toLocaleString("zh-TW")}</dd></div><div><dt>小計</dt><dd>{((item.price || 0) * item.quantity).toLocaleString("zh-TW")}</dd></div><div><dt>配送方式</dt><dd>{deliveryLabel(order.fulfillment)}</dd></div><div><dt>處理方式</dt><dd>{processingSummaryText}</dd></div><div><dt>備註</dt><dd>{order.note || "無"}</dd></div></dl><p>確認後將正式扣除庫存，並把魚貨需求標記為已完成。</p><div><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setConfirming(false)}>返回編輯</button><button type="button" disabled={busy} onClick={confirmDraft}>{busy ? "確認中…" : "確認並扣除庫存"}</button></div></section>}</section>}
     {order.fish_request_id && <section className="panel sourceRequestPanel"><h2>來源魚貨需求</h2>{sourceRequest ? <><dl><div><dt>正式魚種</dt><dd>{sourceFishName}</dd></div><div><dt>名稱快照</dt><dd>{sourceRequest.fish_name}</dd></div><div><dt>數量需求</dt><dd>{sourceRequest.quantity_request}</dd></div><div><dt>尺寸偏好</dt><dd>{sourceRequest.size_preference || "未指定"}</dd></div><div><dt>預算</dt><dd>{sourceRequest.budget || "未指定"}</dd></div><div><dt>希望日期</dt><dd>{formatWantedBy(sourceRequest.wanted_by)}</dd></div><div><dt>用途</dt><dd>{sourceRequest.purpose || "未指定"}</dd></div><div><dt>需求狀態</dt><dd>{fishRequestStatusLabel(sourceRequest.status)}</dd></div></dl><Link className="buttonLink secondaryAdminAction" href={"/admin/requests/" + sourceRequest.id}>查看來源需求</Link></> : <p className="notice">{sourceRequestUnavailable ? "來源需求目前無法讀取" : "正在讀取來源需求…"}</p>}</section>}
     <section className="orderDetailGrid">
-      <article className="panel detailCustomer"><header><div><small>建立時間</small><strong>{formatOrderTime(order.created_at, true)}</strong></div><div><small>總計</small><strong className="detailTotal">{orderTotal(order).toLocaleString("zh-TW")}</strong></div></header><h2>{order.customer_name}</h2><dl><div><dt>電話</dt><dd><a href={"tel:" + order.phone}>{order.phone}</a></dd></div>{order.email && <div><dt>Email</dt><dd><a href={"mailto:" + order.email}>{order.email}</a></dd></div>}</dl><div className="quickContact"><a className="buttonLink" href={"tel:" + order.phone}>撥打電話</a>{order.email && <a className="buttonLink secondaryAdminAction" href={"mailto:" + order.email}>寄 Email</a>}{order.customer_id && <Link className="buttonLink secondaryAdminAction" href={"/admin/customers/" + order.customer_id}>查看客戶</Link>}</div></article>
+      <article className="panel detailCustomer"><header><div><small>建立時間</small><strong>{formatOrderTime(order.created_at, true)}</strong></div><div><small>應收總額</small><strong className="detailTotal">NT${orderTotal(order).toLocaleString("zh-TW")}</strong></div></header><h2>{order.customer_name}</h2><dl><div><dt>電話</dt><dd><a href={"tel:" + order.phone}>{order.phone}</a></dd></div>{order.email && <div><dt>Email</dt><dd><a href={"mailto:" + order.email}>{order.email}</a></dd></div>}</dl><div className="quickContact"><a className="buttonLink" href={"tel:" + order.phone}>撥打電話</a>{order.email && <a className="buttonLink secondaryAdminAction" href={"mailto:" + order.email}>寄 Email</a>}{order.customer_id && <Link className="buttonLink secondaryAdminAction" href={"/admin/customers/" + order.customer_id}>查看客戶</Link>}</div></article>
       <article className="panel detailDelivery"><h2>配送資訊</h2><dl><div><dt>配送方式</dt><dd>{deliveryLabel(order.fulfillment)}</dd></div>{Object.entries(parsedNote.details).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>{isDraft && <p className="draftOrderNotice">草稿尚未確認配送與魚貨處理方式，也不代表已保留庫存。</p>}{parsedNote.customerNote && <section className="customerNote"><strong>📝 客人備註</strong><p>{parsedNote.customerNote}</p></section>}</article>
+      <article className="panel detailTotals"><h2>訂單金額</h2>{hasTotalsSnapshot ? <><dl><div><dt>商品小計</dt><dd>NT${orderSubtotal(order).toLocaleString("zh-TW")}</dd></div><div><dt>運費</dt><dd>NT${(order.shipping_fee || 0).toLocaleString("zh-TW")}</dd></div><div><dt>折扣</dt><dd>-NT${(order.discount_amount || 0).toLocaleString("zh-TW")}</dd></div><div><dt>應收總額</dt><dd><strong>NT${orderTotal(order).toLocaleString("zh-TW")}</strong></dd></div></dl>{!isCancelled && <div className="orderTotalsEditor"><label>運費<input type="number" min="0" step="1" value={shippingFee} disabled={busy} onChange={(event) => setShippingFee(event.target.value)} /></label><label>折扣<input type="number" min="0" step="1" value={discountAmount} disabled={busy} onChange={(event) => setDiscountAmount(event.target.value)} /></label><button type="button" disabled={busy} onClick={saveOrderTotals}>{busy ? "儲存中…" : "儲存金額調整"}</button></div>}</> : <p className="notice">此歷史訂單尚無 F003-14 金額 snapshot，維持原始品項價格資料，不會自動回填。</p>}</article>
       <article className="panel detailStatuses"><h2>訂單狀態</h2><label>處理進度<select disabled={busy || isDraft || isCancelled} value={order.status} onChange={(event) => updateOrder({ status: event.target.value })}>{editableOrderStatusOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}{!editableOrderStatusOptions.some((option) => option.value === order.status) && <option value={order.status}>{orderStatusLabel(order.status)}</option>}</select></label>{isDraft && <small>草稿需先補齊配送與魚貨處理方式，不能使用正式訂單取消流程。</small>}{isCancelled && <small>此訂單已取消，庫存已補回，且不能恢復為其他狀態。</small>}<label>付款狀態<select disabled={busy || isDraft || isCancelled} value={order.payment_status} onChange={(event) => updateOrder({ payment_status: event.target.value as PaymentStatus })}><option value="unpaid">未付款</option><option value="paid">已付款</option></select></label><div className="statusSnapshot"><span>{orderStatusLabel(order.status)}</span><span>{paymentStatusLabel(order.payment_status)}</span></div>{canCancel && <div className="orderCancellationActions"><button type="button" className="dangerSecondaryAction" disabled={busy} onClick={() => setCancelling(true)}>取消訂單</button></div>}{cancelling && <section className="orderCancellationConfirm" aria-live="polite"><h3>確認取消訂單</h3><p>取消後，此訂單將標記為已取消；原本已扣除的庫存會依訂單規格與數量補回，並留下庫存異動紀錄。</p><p>此操作無法由此頁恢復，確認前請再次核對訂單內容。</p><div><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setCancelling(false)}>返回</button><button type="button" className="dangerSecondaryAction" disabled={busy} onClick={cancelOrder}>{busy ? "取消中…" : "確認取消並補回庫存"}</button></div></section>}{notice && <p className="notice" aria-live="polite">{notice}</p>}</article>
     </section>
     <section className="panel detailItems"><h2>訂單商品</h2>{order.order_items.map((orderItem) => { const processing = processingSummary(orderItem); const subtotal = (orderItem.price || 0) * orderItem.quantity; return <article className="detailOrderItem" key={orderItem.id}><header><div><h3>{orderItem.product_name}</h3><p>{orderItem.variant_name || "未指定規格"}</p></div><strong>{subtotal.toLocaleString("zh-TW")}</strong></header><dl><div><dt>數量</dt><dd>{orderItem.quantity}</dd></div><div><dt>單價</dt><dd>{(orderItem.price || 0).toLocaleString("zh-TW")}</dd></div><div><dt>小計</dt><dd>{subtotal.toLocaleString("zh-TW")}</dd></div></dl><div className="detailProcessing"><strong>處理：{processing.name}</strong>{processing.extras.map((extra) => <span key={extra}>＋{extra}</span>)}{orderItem.processing_note && <span>其他處理需求：{orderItem.processing_note}</span>}</div></article>; })}</section>

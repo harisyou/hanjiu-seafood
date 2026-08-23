@@ -28,6 +28,10 @@ export type AdminOrder = {
   note: string | null;
   status: OrderStatus;
   payment_status: PaymentStatus;
+  subtotal?: number | null;
+  shipping_fee?: number | null;
+  discount_amount?: number | null;
+  total_amount?: number | null;
   created_at: string;
   order_items: AdminOrderItem[];
 };
@@ -56,7 +60,11 @@ export function paymentStatusLabel(status: PaymentStatus) {
 }
 
 export function orderTotal(order: AdminOrder) {
-  return order.order_items.reduce((sum, item) => sum + (item.price || 0) * item.quantity, 0);
+  return order.total_amount ?? order.order_items.reduce((sum, item) => sum + (item.price || 0) * item.quantity, 0);
+}
+
+export function orderSubtotal(order: AdminOrder) {
+  return order.subtotal ?? order.order_items.reduce((sum, item) => sum + (item.price || 0) * item.quantity, 0);
 }
 
 const presetContents: Record<string, string[]> = {
