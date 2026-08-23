@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { AdminOrder, AdminOrderItem, formatOrderTime, orderStatusLabel, orderStatusOptions, orderSubtotal, orderTotal, parseOrderNote, paymentStatusLabel, processingSummary } from "@/lib/admin-orders";
+import { AdminOrder, AdminOrderItem, formatOrderTime, OrderPayment, orderStatusLabel, orderStatusOptions, orderSubtotal, orderTotal, parseOrderNote, paymentStatusLabel, processingSummary } from "@/lib/admin-orders";
 import { FishRequest, fishRequestStatusLabel, formatWantedBy } from "@/lib/fish-requests";
 
 type ProcessingPreset = { id: string; name: string; active: boolean };
@@ -64,6 +64,7 @@ export default function AdminOrderDetailPage() {
   const [user, setUser] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [order, setOrder] = useState<AdminOrder | null>(null);
+  const [payment, setPayment] = useState<OrderPayment | null>(null);
   const [sourceRequest, setSourceRequest] = useState<FishRequest | null>(null);
   const [sourceFishName, setSourceFishName] = useState("");
   const [sourceRequestUnavailable, setSourceRequestUnavailable] = useState(false);
@@ -82,10 +83,12 @@ export default function AdminOrderDetailPage() {
   const [confirmingPayment, setConfirmingPayment] = useState(false);
 
   const loadOrder = useCallback(async () => {
-    const { data, error } = await supabase.from("orders").select("*,order_items(*),order_payments(*)").eq("id", orderId).single();
+    const { data, error } = await supabase.from("orders").select("*,order_items(*)").eq("id", orderId).single();
     if (error || !data) { setNotice("找不到訂單，或目前沒有讀取權限。"); return; }
     const nextOrder = data as AdminOrder;
     setOrder(nextOrder);
+    const paymentResult = await supabase.from("order_payments").select("amount,payment_method,paid_at").eq("order_id", orderId).maybeSingle();
+    setPayment(paymentResult.error || !paymentResult.data ? null : paymentResult.data as OrderPayment);
     setShippingFee(String(nextOrder.shipping_fee ?? 0));
     setDiscountAmount(String(nextOrder.discount_amount ?? 0));
     setSourceRequest(null); setSourceFishName(""); setSourceRequestUnavailable(false);
@@ -216,7 +219,6 @@ export default function AdminOrderDetailPage() {
   const isCancelled = order.status === "cancelled";
   const canCancel = !isDraft && !isCancelled;
   const hasTotalsSnapshot = order.subtotal !== null && order.subtotal !== undefined;
-  const payment = order.order_payments?.[0];
   const canRecordPayment = !isDraft && !isCancelled && hasTotalsSnapshot && order.payment_status === "unpaid";
   const editableOrderStatusOptions = orderStatusOptions.filter((option) => option.value !== "cancelled");
   const canConfirm = Boolean(order.fulfillment && order.processing && item && order.order_items.length === 1);

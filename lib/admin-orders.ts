@@ -1,6 +1,12 @@
 export type OrderStatus = "draft" | "new" | "processing" | "ready" | "completed" | "cancelled" | "contacted" | "confirmed" | "paid" | "shipped";
 export type PaymentStatus = "unpaid" | "paid";
 
+export type OrderPayment = {
+  amount: number;
+  payment_method: "cash" | "bank_transfer" | "other";
+  paid_at: string;
+};
+
 export type AdminOrderItem = {
   id: string;
   order_id: string;
@@ -32,7 +38,6 @@ export type AdminOrder = {
   shipping_fee?: number | null;
   discount_amount?: number | null;
   total_amount?: number | null;
-  order_payments?: Array<{ amount: number; payment_method: "cash" | "bank_transfer" | "other"; paid_at: string }>;
   created_at: string;
   order_items: AdminOrderItem[];
 };

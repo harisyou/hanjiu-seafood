@@ -50,6 +50,19 @@ test("the database rejects direct payment-status changes outside the payment RPC
   assert.match(migration, /grant execute on function public\.admin_record_order_payment\(uuid, integer, text\) to authenticated/);
 });
 
+test("admin detail independently reloads the authoritative payment record after a successful RPC", () => {
+  assert.match(detailPage, /from\("order_payments"\)\.select\("amount,payment_method,paid_at"\)\.eq\("order_id", orderId\)\.maybeSingle\(\)/);
+  assert.match(detailPage, /setPayment\(paymentResult\.error \|\| !paymentResult\.data \? null : paymentResult\.data as OrderPayment\)/);
+  assert.doesNotMatch(detailPage, /order_payments\(\*\)/);
+});
+
+test("payment rendering prioritizes an authoritative record over all unpaid and historical states", () => {
+  assert.match(detailPage, /\{payment \? <dl><div><dt>付款狀態<\/dt><dd>已付款<\/dd>/);
+  assert.match(detailPage, /<\/dl> : canRecordPayment \? <>/);
+  assert.match(detailPage, /const canRecordPayment = !isDraft && !isCancelled && hasTotalsSnapshot && order\.payment_status === "unpaid"/);
+  assert.match(detailPage, /此歷史訂單尚無金額 snapshot，不能確認收款。/);
+});
+
 test("admin detail replaces direct payment-status editing with explicit payment confirmation", () => {
   assert.match(detailPage, /supabase\.rpc\("admin_record_order_payment", \{ p_order_id: order\.id, p_amount: orderTotal\(order\), p_payment_method: paymentMethod \}\)/);
   assert.match(detailPage, /確認後會記錄實收金額與付款方式，並將付款狀態改為已付款。/);
