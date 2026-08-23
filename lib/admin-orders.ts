@@ -1,6 +1,12 @@
 export type OrderStatus = "draft" | "new" | "processing" | "ready" | "completed" | "cancelled" | "contacted" | "confirmed" | "paid" | "shipped";
 export type PaymentStatus = "unpaid" | "paid";
 
+export type OrderPayment = {
+  amount: number;
+  payment_method: "cash" | "bank_transfer" | "other";
+  paid_at: string;
+};
+
 export type AdminOrderItem = {
   id: string;
   order_id: string;

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { AdminOrder, AdminOrderItem, formatOrderTime, orderStatusLabel, orderStatusOptions, orderSubtotal, orderTotal, parseOrderNote, PaymentStatus, paymentStatusLabel, processingSummary } from "@/lib/admin-orders";
+import { AdminOrder, AdminOrderItem, formatOrderTime, OrderPayment, orderStatusLabel, orderStatusOptions, orderSubtotal, orderTotal, parseOrderNote, paymentStatusLabel, processingSummary } from "@/lib/admin-orders";
 import { FishRequest, fishRequestStatusLabel, formatWantedBy } from "@/lib/fish-requests";
 
 type ProcessingPreset = { id: string; name: string; active: boolean };
@@ -45,7 +45,14 @@ function errorMessage(message: string) {
     invalid_shipping_fee: "運費必須是大於或等於 0 的整數金額。",
     invalid_discount_amount: "折扣必須是大於或等於 0 的整數金額。",
     cancelled_order_totals_locked: "已取消訂單的金額 snapshot 不能再修改。",
-    order_totals_snapshot_missing: "此歷史訂單尚無金額 snapshot，不能進行調整。"
+    order_totals_snapshot_missing: "此歷史訂單尚無金額 snapshot，不能進行此操作。",
+    draft_order_payment_not_allowed: "草稿訂單尚未成立，不能確認收款。",
+    cancelled_order_payment_not_allowed: "已取消訂單不能確認收款。",
+    order_already_paid: "此訂單已付款，不能重複記錄收款。",
+    invalid_payment_amount: "實收金額必須大於 0。",
+    invalid_payment_method: "請選擇有效付款方式。",
+    payment_amount_mismatch: "實收金額必須與訂單應收總額一致。",
+    order_payment_rpc_required: "請使用確認收款功能，不能直接修改付款狀態。"
   };
   return Object.entries(messages).find(([code]) => message.includes(code))?.[1] || "操作失敗，請稍後再試。";
 }
@@ -57,6 +64,7 @@ export default function AdminOrderDetailPage() {
   const [user, setUser] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [order, setOrder] = useState<AdminOrder | null>(null);
+  const [payment, setPayment] = useState<OrderPayment | null>(null);
   const [sourceRequest, setSourceRequest] = useState<FishRequest | null>(null);
   const [sourceFishName, setSourceFishName] = useState("");
   const [sourceRequestUnavailable, setSourceRequestUnavailable] = useState(false);
@@ -71,12 +79,16 @@ export default function AdminOrderDetailPage() {
   const [cancelling, setCancelling] = useState(false);
   const [shippingFee, setShippingFee] = useState("0");
   const [discountAmount, setDiscountAmount] = useState("0");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
 
   const loadOrder = useCallback(async () => {
     const { data, error } = await supabase.from("orders").select("*,order_items(*)").eq("id", orderId).single();
     if (error || !data) { setNotice("找不到訂單，或目前沒有讀取權限。"); return; }
     const nextOrder = data as AdminOrder;
     setOrder(nextOrder);
+    const paymentResult = await supabase.from("order_payments").select("amount,payment_method,paid_at").eq("order_id", orderId).maybeSingle();
+    setPayment(paymentResult.error || !paymentResult.data ? null : paymentResult.data as OrderPayment);
     setShippingFee(String(nextOrder.shipping_fee ?? 0));
     setDiscountAmount(String(nextOrder.discount_amount ?? 0));
     setSourceRequest(null); setSourceFishName(""); setSourceRequestUnavailable(false);
@@ -125,7 +137,7 @@ export default function AdminOrderDetailPage() {
     });
   }, [loadOrder, supabase]);
 
-  async function updateOrder(payload: { status?: string; payment_status?: PaymentStatus }) {
+  async function updateOrder(payload: { status?: string }) {
     if (!order || busy) return;
     if (payload.status === "cancelled") return;
     setBusy(true); setNotice("");
@@ -188,6 +200,15 @@ export default function AdminOrderDetailPage() {
     else { setNotice("運費、折扣與應收總額已更新。"); await loadOrder(); }
   }
 
+  async function recordPayment() {
+    if (!order || busy) return;
+    setBusy(true); setNotice("");
+    const { error } = await supabase.rpc("admin_record_order_payment", { p_order_id: order.id, p_amount: orderTotal(order), p_payment_method: paymentMethod });
+    setBusy(false); setConfirmingPayment(false);
+    if (error) setNotice(errorMessage(error.message));
+    else { setNotice("收款已記錄，付款狀態已更新為已付款。"); await loadOrder(); }
+  }
+
   if (!authReady) return <main className="admin"><section className="panel centeredNotice">驗證管理員身分中…</section></main>;
   if (!user) return <main className="admin"><section className="panel centeredNotice"><h1>此頁僅限管理員</h1><Link className="buttonLink" href="/admin">前往登入</Link></section></main>;
   if (!order) return <main className="admin"><section className="panel centeredNotice"><Link href="/admin/orders">← 返回訂單</Link><p>{notice || "載入訂單中…"}</p></section></main>;
@@ -198,6 +219,7 @@ export default function AdminOrderDetailPage() {
   const isCancelled = order.status === "cancelled";
   const canCancel = !isDraft && !isCancelled;
   const hasTotalsSnapshot = order.subtotal !== null && order.subtotal !== undefined;
+  const canRecordPayment = !isDraft && !isCancelled && hasTotalsSnapshot && order.payment_status === "unpaid";
   const editableOrderStatusOptions = orderStatusOptions.filter((option) => option.value !== "cancelled");
   const canConfirm = Boolean(order.fulfillment && order.processing && item && order.order_items.length === 1);
   const selectedPreset = presets.find((preset) => preset.id === draftForm.presetId);
@@ -212,7 +234,8 @@ export default function AdminOrderDetailPage() {
       <article className="panel detailCustomer"><header><div><small>建立時間</small><strong>{formatOrderTime(order.created_at, true)}</strong></div><div><small>應收總額</small><strong className="detailTotal">NT${orderTotal(order).toLocaleString("zh-TW")}</strong></div></header><h2>{order.customer_name}</h2><dl><div><dt>電話</dt><dd><a href={"tel:" + order.phone}>{order.phone}</a></dd></div>{order.email && <div><dt>Email</dt><dd><a href={"mailto:" + order.email}>{order.email}</a></dd></div>}</dl><div className="quickContact"><a className="buttonLink" href={"tel:" + order.phone}>撥打電話</a>{order.email && <a className="buttonLink secondaryAdminAction" href={"mailto:" + order.email}>寄 Email</a>}{order.customer_id && <Link className="buttonLink secondaryAdminAction" href={"/admin/customers/" + order.customer_id}>查看客戶</Link>}</div></article>
       <article className="panel detailDelivery"><h2>配送資訊</h2><dl><div><dt>配送方式</dt><dd>{deliveryLabel(order.fulfillment)}</dd></div>{Object.entries(parsedNote.details).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>{isDraft && <p className="draftOrderNotice">草稿尚未確認配送與魚貨處理方式，也不代表已保留庫存。</p>}{parsedNote.customerNote && <section className="customerNote"><strong>📝 客人備註</strong><p>{parsedNote.customerNote}</p></section>}</article>
       <article className="panel detailTotals"><h2>訂單金額</h2>{hasTotalsSnapshot ? <><dl><div><dt>商品小計</dt><dd>NT${orderSubtotal(order).toLocaleString("zh-TW")}</dd></div><div><dt>運費</dt><dd>NT${(order.shipping_fee || 0).toLocaleString("zh-TW")}</dd></div><div><dt>折扣</dt><dd>-NT${(order.discount_amount || 0).toLocaleString("zh-TW")}</dd></div><div><dt>應收總額</dt><dd><strong>NT${orderTotal(order).toLocaleString("zh-TW")}</strong></dd></div></dl>{!isCancelled && <div className="orderTotalsEditor"><label>運費<input type="number" min="0" step="1" value={shippingFee} disabled={busy} onChange={(event) => setShippingFee(event.target.value)} /></label><label>折扣<input type="number" min="0" step="1" value={discountAmount} disabled={busy} onChange={(event) => setDiscountAmount(event.target.value)} /></label><button type="button" disabled={busy} onClick={saveOrderTotals}>{busy ? "儲存中…" : "儲存金額調整"}</button></div>}</> : <p className="notice">此歷史訂單尚無 F003-14 金額 snapshot，維持原始品項價格資料，不會自動回填。</p>}</article>
-      <article className="panel detailStatuses"><h2>訂單狀態</h2><label>處理進度<select disabled={busy || isDraft || isCancelled} value={order.status} onChange={(event) => updateOrder({ status: event.target.value })}>{editableOrderStatusOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}{!editableOrderStatusOptions.some((option) => option.value === order.status) && <option value={order.status}>{orderStatusLabel(order.status)}</option>}</select></label>{isDraft && <small>草稿需先補齊配送與魚貨處理方式，不能使用正式訂單取消流程。</small>}{isCancelled && <small>此訂單已取消，庫存已補回，且不能恢復為其他狀態。</small>}<label>付款狀態<select disabled={busy || isDraft || isCancelled} value={order.payment_status} onChange={(event) => updateOrder({ payment_status: event.target.value as PaymentStatus })}><option value="unpaid">未付款</option><option value="paid">已付款</option></select></label><div className="statusSnapshot"><span>{orderStatusLabel(order.status)}</span><span>{paymentStatusLabel(order.payment_status)}</span></div>{canCancel && <div className="orderCancellationActions"><button type="button" className="dangerSecondaryAction" disabled={busy} onClick={() => setCancelling(true)}>取消訂單</button></div>}{cancelling && <section className="orderCancellationConfirm" aria-live="polite"><h3>確認取消訂單</h3><p>取消後，此訂單將標記為已取消；原本已扣除的庫存會依訂單規格與數量補回，並留下庫存異動紀錄。</p><p>此操作無法由此頁恢復，確認前請再次核對訂單內容。</p><div><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setCancelling(false)}>返回</button><button type="button" className="dangerSecondaryAction" disabled={busy} onClick={cancelOrder}>{busy ? "取消中…" : "確認取消並補回庫存"}</button></div></section>}{notice && <p className="notice" aria-live="polite">{notice}</p>}</article>
+      <article className="panel detailPayment"><h2>收款紀錄</h2>{payment ? <dl><div><dt>付款狀態</dt><dd>已付款</dd></div><div><dt>實收金額</dt><dd>NT${payment.amount.toLocaleString("zh-TW")}</dd></div><div><dt>付款方式</dt><dd>{{ cash: "現金", bank_transfer: "銀行轉帳", other: "其他" }[payment.payment_method]}</dd></div><div><dt>付款時間</dt><dd>{formatOrderTime(payment.paid_at, true)}</dd></div></dl> : canRecordPayment ? <><p>付款狀態：未付款</p><p>應收金額：<strong>NT${orderTotal(order).toLocaleString("zh-TW")}</strong></p><label>付款方式<select value={paymentMethod} disabled={busy} onChange={(event) => setPaymentMethod(event.target.value)}><option value="cash">現金</option><option value="bank_transfer">銀行轉帳</option><option value="other">其他</option></select></label><button type="button" disabled={busy} onClick={() => setConfirmingPayment(true)}>確認收款</button>{confirmingPayment && <section className="orderPaymentConfirm" aria-live="polite"><p>確認後會記錄實收金額與付款方式，並將付款狀態改為已付款。</p><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setConfirmingPayment(false)}>返回</button><button type="button" disabled={busy} onClick={recordPayment}>{busy ? "記錄中…" : "確認收款"}</button></section>}</> : <p className="notice">{isDraft ? "草稿訂單不能確認收款。" : isCancelled ? "已取消訂單不能確認收款。" : "此歷史訂單尚無金額 snapshot，不能確認收款。"}</p>}</article>
+      <article className="panel detailStatuses"><h2>訂單狀態</h2><label>處理進度<select disabled={busy || isDraft || isCancelled} value={order.status} onChange={(event) => updateOrder({ status: event.target.value })}>{editableOrderStatusOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}{!editableOrderStatusOptions.some((option) => option.value === order.status) && <option value={order.status}>{orderStatusLabel(order.status)}</option>}</select></label>{isDraft && <small>草稿需先補齊配送與魚貨處理方式，不能使用正式訂單取消流程。</small>}{isCancelled && <small>此訂單已取消，庫存已補回，且不能恢復為其他狀態。</small>}<p>付款狀態：{paymentStatusLabel(order.payment_status)}</p><div className="statusSnapshot"><span>{orderStatusLabel(order.status)}</span><span>{paymentStatusLabel(order.payment_status)}</span></div>{canCancel && <div className="orderCancellationActions"><button type="button" className="dangerSecondaryAction" disabled={busy} onClick={() => setCancelling(true)}>取消訂單</button></div>}{cancelling && <section className="orderCancellationConfirm" aria-live="polite"><h3>確認取消訂單</h3><p>取消後，此訂單將標記為已取消；原本已扣除的庫存會依訂單規格與數量補回，並留下庫存異動紀錄。</p><p>此操作無法由此頁恢復，確認前請再次核對訂單內容。</p><div><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setCancelling(false)}>返回</button><button type="button" className="dangerSecondaryAction" disabled={busy} onClick={cancelOrder}>{busy ? "取消中…" : "確認取消並補回庫存"}</button></div></section>}{notice && <p className="notice" aria-live="polite">{notice}</p>}</article>
     </section>
     <section className="panel detailItems"><h2>訂單商品</h2>{order.order_items.map((orderItem) => { const processing = processingSummary(orderItem); const subtotal = (orderItem.price || 0) * orderItem.quantity; return <article className="detailOrderItem" key={orderItem.id}><header><div><h3>{orderItem.product_name}</h3><p>{orderItem.variant_name || "未指定規格"}</p></div><strong>{subtotal.toLocaleString("zh-TW")}</strong></header><dl><div><dt>數量</dt><dd>{orderItem.quantity}</dd></div><div><dt>單價</dt><dd>{(orderItem.price || 0).toLocaleString("zh-TW")}</dd></div><div><dt>小計</dt><dd>{subtotal.toLocaleString("zh-TW")}</dd></div></dl><div className="detailProcessing"><strong>處理：{processing.name}</strong>{processing.extras.map((extra) => <span key={extra}>＋{extra}</span>)}{orderItem.processing_note && <span>其他處理需求：{orderItem.processing_note}</span>}</div></article>; })}</section>
   </main>;
