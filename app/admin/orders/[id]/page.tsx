@@ -41,7 +41,11 @@ function errorMessage(message: string) {
     order_inventory_provenance_missing: "找不到此訂單原始扣庫存紀錄，為避免錯誤補庫存，請改由人工處理。",
     order_already_restored: "此訂單已有補庫存紀錄，請重新載入。",
     order_cancellation_rpc_required: "請使用取消訂單功能，系統會安全補回庫存。",
-    order_cancelled_terminal: "已取消的訂單不能恢復為其他狀態。"
+    order_cancelled_terminal: "已取消的訂單不能恢復為其他狀態。",
+    invalid_shipping_fee: "運費必須是大於或等於 0 的整數金額。",
+    invalid_discount_amount: "折扣必須是大於或等於 0 的整數金額。",
+    cancelled_order_totals_locked: "已取消訂單的金額 snapshot 不能再修改。",
+    order_totals_snapshot_missing: "此歷史訂單尚無金額 snapshot，不能進行調整。"
   };
   return Object.entries(messages).find(([code]) => message.includes(code))?.[1] || "操作失敗，請稍後再試。";
 }
