@@ -62,7 +62,8 @@ test("admin detail uses the cancellation RPC only after explicit confirmation", 
   assert.match(detailPage, /supabase\.rpc\("admin_cancel_order", \{ p_order_id: order\.id \}\)/);
   assert.match(detailPage, /確認取消並補回庫存/);
   assert.match(detailPage, /訂單已取消，庫存已補回，並已寫入庫存異動紀錄。/);
-  assert.match(detailPage, /const canCancel = !isDraft && !isCancelled/);
+  assert.match(detailPage, /const canCancel = !isDraft && !isCancelled && order\.payment_status !== "paid"/);
   assert.match(detailPage, /if \(payload\.status === "cancelled"\) return/);
   assert.match(detailPage, /disabled=\{busy \|\| isDraft \|\| isCancelled\}/);
 });
+
