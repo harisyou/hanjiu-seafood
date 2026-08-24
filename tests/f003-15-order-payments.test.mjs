@@ -51,14 +51,15 @@ test("the database rejects direct payment-status changes outside the payment RPC
 });
 
 test("admin detail independently reloads the authoritative payment record after a successful RPC", () => {
-  assert.match(detailPage, /from\("order_payments"\)\.select\("amount,payment_method,paid_at"\)\.eq\("order_id", orderId\)\.maybeSingle\(\)/);
+  assert.match(detailPage, /from\("order_payments"\)\.select\("id,amount,payment_method,paid_at"\)\.eq\("order_id", orderId\)\.maybeSingle\(\)/);
   assert.match(detailPage, /setPayment\(paymentResult\.error \|\| !paymentResult\.data \? null : paymentResult\.data as OrderPayment\)/);
   assert.doesNotMatch(detailPage, /order_payments\(\*\)/);
 });
 
 test("payment rendering prioritizes an authoritative record over all unpaid and historical states", () => {
-  assert.match(detailPage, /\{payment \? <dl><div><dt>付款狀態<\/dt><dd>已付款<\/dd>/);
-  assert.match(detailPage, /<\/dl> : canRecordPayment \? <>/);
+  assert.match(detailPage, /\{payment \? <>\{paymentReversal/);
+  assert.match(detailPage, /paymentReversal \? "未付款（原收款已撤銷）" : "已付款"/);
+  assert.match(detailPage, /<\/> : canRecordPayment \? <>/);
   assert.match(detailPage, /const canRecordPayment = !isDraft && !isCancelled && hasTotalsSnapshot && order\.payment_status === "unpaid"/);
   assert.match(detailPage, /此歷史訂單尚無金額 snapshot，不能確認收款。/);
 });
@@ -71,3 +72,4 @@ test("admin detail replaces direct payment-status editing with explicit payment 
   assert.match(detailPage, /此歷史訂單尚無金額 snapshot，不能確認收款。/);
   assert.doesNotMatch(detailPage, /updateOrder\(\{ payment_status/);
 });
+
