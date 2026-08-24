@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const sql = fs.readFileSync("supabase/f003-18-repayment-lifecycle.sql", "utf8");
+const integritySql = fs.readFileSync("supabase/f003-18-repayment-integrity.sql", "utf8");
 const page = fs.readFileSync("app/admin/orders/[id]/page.tsx", "utf8");
 const types = fs.readFileSync("lib/admin-orders.ts", "utf8");
 
@@ -42,6 +43,22 @@ test("F003-18 keeps payment facts append-only", () => {
   assert.doesNotMatch(sql, /delete\s+from\s+public\.order_payments/i);
   assert.doesNotMatch(sql, /update\s+public\.order_payments\s+set\s+(amount|payment_method|paid_at)/i);
   assert.doesNotMatch(sql, /delete\s+from\s+public\.order_payment_reversals/i);
+});
+
+test("F003-18 audit understands multiple attempts and checks active-payment cardinality", () => {
+  assert.match(integritySql, /active_payment_count/i);
+  assert.match(integritySql, /multiple_active_payments/i);
+  assert.match(integritySql, /paid_without_active_payment/i);
+  assert.match(integritySql, /unpaid_with_active_payment/i);
+  assert.match(integritySql, /paid_active_payment_amount_mismatch/i);
+  assert.match(integritySql, /cancelled_order_paid_or_active_payment/i);
+  assert.match(integritySql, /reversal_order_mismatch/i);
+});
+
+test("F003-18 audit does not treat a reversed historical attempt as active", () => {
+  assert.match(integritySql, /reversal\.id is null as is_active/i);
+  assert.match(integritySql, /filter \(where facts\.is_active\)/i);
+  assert.doesNotMatch(integritySql, /reversed_payment_order_still_paid/i);
 });
 
 test("admin payment types expose attempt and reversal relationship", () => {
