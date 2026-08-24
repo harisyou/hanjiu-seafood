@@ -10,6 +10,12 @@ const detail = readFileSync(new URL("../app/admin/orders/[id]/page.tsx", import.
 const rpc = migration.slice(migration.indexOf("create or replace function public.admin_reverse_order_payment"), migration.indexOf("-- Preserve F003-13"));
 const cancelRpc = migration.slice(migration.indexOf("create or replace function public.admin_cancel_order"));
 
+function functionDefinition(sql, name) {
+  const start = sql.indexOf(`create or replace function public.${name}`);
+  const end = sql.indexOf("\n$$;", start) + 4;
+  return sql.slice(start, end);
+}
+
 test("reversals are append-only authoritative facts protected from direct clients", () => {
   assert.match(migration, /create table if not exists public\.order_payment_reversals/);
   assert.match(migration, /payment_id uuid not null unique references public\.order_payments\(id\) on delete restrict/);
@@ -36,6 +42,13 @@ test("admin RPC validates, locks, copies the full amount, and atomically marks u
   assert.doesNotMatch(rpc, /commit;|rollback;|p_amount/i);
 });
 
+test("concurrent reversals serialize on the order and retain a unique database backstop", () => {
+  assert.ok(rpc.indexOf("for update") < rpc.indexOf("payment_already_reversed"));
+  assert.match(paymentMigration, /order_id uuid not null unique references public\.orders\(id\)/);
+  assert.match(migration, /payment_id uuid not null unique references public\.order_payments\(id\)/);
+  assert.ok(rpc.indexOf("payment_already_reversed") < rpc.indexOf("insert into public.order_payment_reversals"));
+});
+
 test("permissions allow authenticated admins only through the RPC", () => {
   assert.match(migration, /revoke all on function public\.admin_reverse_order_payment\(uuid, text\) from public, anon, authenticated/);
   assert.match(migration, /grant execute on function public\.admin_reverse_order_payment\(uuid, text\) to authenticated/);
@@ -50,6 +63,15 @@ test("paid unreversed orders must reverse before cancellation without changing r
   assert.match(cancelRpc, /set status = 'cancelled'/);
   assert.match(cancellationMigration, /order_cancel_restore/);
   assert.match(totalsMigration, /total_amount = greatest\(subtotal \+ shipping_fee - discount_amount, 0\)/);
+  assert.ok(cancelRpc.indexOf("paid_order_requires_payment_reversal") < cancelRpc.indexOf("app.inventory_movement_type"));
+});
+
+test("F003-16 cancellation is byte-for-byte latest F003-13 plus only the paid guard", () => {
+  const guard = "  if v_order.payment_status = 'paid' then raise exception 'paid_order_requires_payment_reversal'; end if;\n";
+  const latest = functionDefinition(cancellationMigration, "admin_cancel_order");
+  const revised = functionDefinition(migration, "admin_cancel_order");
+  assert.equal(revised.replace(guard, ""), latest);
+  assert.equal(revised.split(guard).length, 2);
 });
 
 test("admin UI keeps the payment audit trail and requires explicit reason confirmation", () => {
@@ -75,5 +97,23 @@ test("one-payment unique model intentionally prevents collecting again after rev
   assert.match(paymentMigration, /order_id uuid not null unique references public\.orders\(id\)/);
   assert.match(paymentMigration, /exists \(select 1 from public\.order_payments where order_id = v_order\.id\)/);
   assert.doesNotMatch(migration, /drop constraint|drop index/i);
+});
+
+test("full paid-to-reversed-to-cancelled flow preserves payment and restores inventory once", () => {
+  const recordRpc = paymentMigration.slice(paymentMigration.indexOf("create or replace function public.admin_record_order_payment"));
+  assert.match(recordRpc, /insert into public\.order_payments/);
+  assert.match(recordRpc, /set payment_status = 'paid'/);
+  assert.match(rpc, /insert into public\.order_payment_reversals/);
+  assert.match(rpc, /set payment_status = 'unpaid'/);
+  assert.doesNotMatch(rpc, /delete from public\.order_payments|update public\.order_payments/i);
+  assert.match(cancelRpc, /movement_type = 'order_cancel_restore'[\s\S]*order_already_restored/);
+  assert.match(cancelRpc, /set inventory = variant\.inventory \+ v_item\.quantity/);
+});
+
+test("a second reversal fails before insert or status mutation", () => {
+  const duplicateCheck = rpc.indexOf("payment_already_reversed");
+  assert.ok(duplicateCheck > rpc.indexOf("for update"));
+  assert.ok(duplicateCheck < rpc.indexOf("insert into public.order_payment_reversals"));
+  assert.ok(duplicateCheck < rpc.indexOf("set payment_status = 'unpaid'"));
 });
 

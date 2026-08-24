@@ -61,35 +61,89 @@ $$;
 
 -- Preserve F003-13 inventory restoration while requiring paid orders to be reversed first.
 create or replace function public.admin_cancel_order(p_order_id uuid)
-returns public.orders language plpgsql security definer set search_path = public, pg_temp as $$
+returns public.orders
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
 declare
-  v_order public.orders; v_item record; v_restored public.product_variants; v_deducted_quantity bigint;
+  v_order public.orders;
+  v_item record;
+  v_restored public.product_variants;
+  v_deducted_quantity bigint;
 begin
   if not public.is_hanjiu_admin() then raise exception 'admin_required'; end if;
   if p_order_id is null then raise exception 'order_not_found'; end if;
-  select * into v_order from public.orders where id = p_order_id for update;
+
+  select * into v_order
+  from public.orders
+  where id = p_order_id
+  for update;
   if not found then raise exception 'order_not_found'; end if;
   if v_order.status = 'draft' then raise exception 'order_not_cancellable_draft'; end if;
   if v_order.status = 'cancelled' then raise exception 'order_already_cancelled'; end if;
-  -- A paid historical order without an authoritative payment is blocked too: it cannot
-  -- be safely reversed and its financial meaning must not be guessed by cancellation.
   if v_order.payment_status = 'paid' then raise exception 'paid_order_requires_payment_reversal'; end if;
-  if v_order.status not in ('new', 'processing', 'ready', 'completed', 'contacted', 'confirmed', 'paid', 'shipped') then raise exception 'order_not_cancellable'; end if;
-  if not exists (select 1 from public.order_items where order_id = v_order.id) then raise exception 'order_items_missing'; end if;
+  if v_order.status not in ('new', 'processing', 'ready', 'completed', 'contacted', 'confirmed', 'paid', 'shipped') then
+    raise exception 'order_not_cancellable';
+  end if;
+  if not exists (select 1 from public.order_items where order_id = v_order.id) then
+    raise exception 'order_items_missing';
+  end if;
+
+  -- The order lock makes retries/concurrent cancellation serialize. Aggregate and sort
+  -- by original variant ID so every affected inventory row is locked deterministically.
   perform set_config('app.inventory_movement_type', 'order_cancel_restore', true);
   perform set_config('app.inventory_movement_order_id', v_order.id::text, true);
   perform set_config('app.inventory_movement_fish_request_id', coalesce(v_order.fish_request_id::text, ''), true);
-  for v_item in select variant_id, product_id, sum(quantity)::integer as quantity from public.order_items where order_id = v_order.id group by variant_id, product_id order by variant_id nulls first, product_id nulls first loop
-    if v_item.variant_id is null or v_item.product_id is null or v_item.quantity is null or v_item.quantity < 1 then raise exception 'order_item_variant_unrestorable'; end if;
-    select coalesce(sum(-inventory_delta), 0) into v_deducted_quantity from public.inventory_movements where order_id = v_order.id and variant_id = v_item.variant_id and product_id = v_item.product_id and movement_type in ('checkout_sale', 'fish_request_order_confirmation');
-    if v_deducted_quantity <> v_item.quantity then raise exception 'order_inventory_provenance_missing'; end if;
-    if exists (select 1 from public.inventory_movements where order_id = v_order.id and variant_id = v_item.variant_id and product_id = v_item.product_id and movement_type = 'order_cancel_restore') then raise exception 'order_already_restored'; end if;
-    update public.product_variants variant set inventory = variant.inventory + v_item.quantity where variant.id = v_item.variant_id and variant.product_id = v_item.product_id returning * into v_restored;
+
+  for v_item in
+    select variant_id, product_id, sum(quantity)::integer as quantity
+    from public.order_items
+    where order_id = v_order.id
+    group by variant_id, product_id
+    order by variant_id nulls first, product_id nulls first
+  loop
+    if v_item.variant_id is null or v_item.product_id is null or v_item.quantity is null or v_item.quantity < 1 then
+      raise exception 'order_item_variant_unrestorable';
+    end if;
+
+    select coalesce(sum(-inventory_delta), 0)
+    into v_deducted_quantity
+    from public.inventory_movements
+    where order_id = v_order.id
+      and variant_id = v_item.variant_id
+      and product_id = v_item.product_id
+      and movement_type in ('checkout_sale', 'fish_request_order_confirmation');
+    if v_deducted_quantity <> v_item.quantity then
+      raise exception 'order_inventory_provenance_missing';
+    end if;
+    if exists (
+      select 1
+      from public.inventory_movements
+      where order_id = v_order.id
+        and variant_id = v_item.variant_id
+        and product_id = v_item.product_id
+        and movement_type = 'order_cancel_restore'
+    ) then
+      raise exception 'order_already_restored';
+    end if;
+
+    update public.product_variants variant
+    set inventory = variant.inventory + v_item.quantity
+    where variant.id = v_item.variant_id
+      and variant.product_id = v_item.product_id
+    returning * into v_restored;
     if not found then raise exception 'order_item_variant_unrestorable'; end if;
   end loop;
+
   perform set_config('app.order_cancellation_authorized', 'true', true);
-  update public.orders set status = 'cancelled' where id = v_order.id and status <> 'cancelled' returning * into v_order;
+  update public.orders
+  set status = 'cancelled'
+  where id = v_order.id
+    and status <> 'cancelled'
+  returning * into v_order;
   if not found then raise exception 'order_already_cancelled'; end if;
+
   return v_order;
 end;
 $$;
