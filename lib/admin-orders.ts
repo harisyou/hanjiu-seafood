@@ -51,6 +51,7 @@ export type AdminOrder = {
   shipping_fee?: number | null;
   discount_amount?: number | null;
   total_amount?: number | null;
+  checkout_idempotency_key?: string | null;
   created_at: string;
   order_items: AdminOrderItem[];
 };
