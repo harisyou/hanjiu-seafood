@@ -6,11 +6,13 @@ export type OrderPayment = {
   amount: number;
   payment_method: "cash" | "bank_transfer" | "other";
   paid_at: string;
+  actor_id: string | null;
   attempt_number: number;
   idempotency_key: string | null;
 };
 
 export type OrderPaymentReversal = {
+  id: string;
   payment_id: string;
   amount: number;
   reason: string;
