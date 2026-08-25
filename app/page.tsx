@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { formatPrice, ProcessingOption, ProcessingPreset, ProcessingPresetOption, Product, ProductProcessingOption, ProductProcessingPreset, ProductVariant } from "@/lib/catalog";
 import { isValidEmail, isValidTaiwanMobile, normalizeTaiwanMobile, taipeiCurrentTime, taipeiToday, validateTaipeiDateTime } from "@/lib/customer-validation";
+import { checkoutRequestFingerprint, checkoutRetryKey, clearCheckoutRetryKey } from "@/lib/checkout-idempotency";
 import FishRequestForm from "./fish-request-form";
 
 type CartItem = {
@@ -542,24 +543,36 @@ export default function HomePage() {
     }
 
     const deliveryDetails = [
-      form.address && `地址：${form.address}`,
+      form.address.trim() && `地址：${form.address.trim()}`,
       form.pickupDate && `日期：${form.pickupDate}`,
       form.pickupTime && `時間：${form.pickupTime}`,
-      form.preferredStoreName && `門市：${form.preferredStoreName}`,
-      form.preferredStoreCode && `店號：${form.preferredStoreCode}`,
-      form.note && `備註：${form.note}`
+      form.preferredStoreName.trim() && `門市：${form.preferredStoreName.trim()}`,
+      form.preferredStoreCode.trim() && `店號：${form.preferredStoreCode.trim()}`,
+      form.note.trim() && `備註：${form.note.trim()}`
     ].filter(Boolean).join("\n");
+    const checkoutItems = cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity, processing_preset_id: item.processing_preset_id, processing_option_ids: item.processing_option_ids, processing_note: item.processing_note }));
+    const retryFingerprint = checkoutRequestFingerprint({
+      customer_name: normalizedForm.customer_name,
+      phone: normalizedPhone,
+      email: normalizedForm.email || null,
+      fulfillment: form.fulfillment,
+      note: deliveryDetails || null,
+      items: checkoutItems
+    });
+    const idempotencyKey = checkoutRetryKey(retryFingerprint);
     const { data: orderId, error } = await supabase.rpc("create_checkout_order", {
       p_customer_name: normalizedForm.customer_name,
       p_phone: normalizedPhone,
       p_fulfillment: form.fulfillment,
       p_note: deliveryDetails || null,
-      p_items: cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity, processing_preset_id: item.processing_preset_id, processing_option_ids: item.processing_option_ids, processing_note: item.processing_note })),
-      p_email: normalizedForm.email || null
+      p_items: checkoutItems,
+      p_email: normalizedForm.email || null,
+      p_idempotency_key: idempotencyKey
     });
     if (error || !orderId) {
       console.error("Atomic checkout RPC failed", error);
-      setNotice(error?.message.includes("processing_updated") ? "此商品的處理方式已更新，請重新確認。" : "訂單送出失敗，請稍後再試，或透過 LINE 與韓九聯繫。");
+      if (error?.message.includes("checkout_idempotency_conflict")) clearCheckoutRetryKey(idempotencyKey);
+      setNotice(error?.message.includes("processing_updated") ? "此商品的處理方式已更新，請重新確認。" : error?.message.includes("checkout_idempotency_conflict") ? "此筆訂單資料已變更，請重新確認後再送出。" : "訂單送出失敗，請稍後再試，或透過 LINE 與韓九聯繫。");
       setIsSubmitting(false);
       return;
     }
@@ -580,6 +593,7 @@ export default function HomePage() {
       inventory: Math.max(0, variant.inventory - (purchasedByVariant.get(variant.id) || 0))
     })));
     setCart([]);
+    clearCheckoutRetryKey(idempotencyKey);
     setNotice("訂單已送出");
     setIsSubmitting(false);
     window.open("https://lin.ee/q4avfUZ", "_blank", "noopener,noreferrer");
