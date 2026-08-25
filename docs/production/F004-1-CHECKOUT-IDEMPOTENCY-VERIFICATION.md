@@ -19,7 +19,8 @@
 The database, not the browser, is authoritative. It computes an MD5 fingerprint
 from canonical `jsonb` with these fields only:
 
-- `customer_name`: trimmed, maximum 100 characters.
+- `customer_name`: trimmed, first 100 PostgreSQL text characters (not JavaScript
+  UTF-16 code units).
 - `phone`: digits only.
 - `email`: trimmed, lower-cased, blank becomes `null`.
 - `fulfillment`: the existing exact delivery-method value.
@@ -27,7 +28,7 @@ from canonical `jsonb` with these fields only:
 - `items`: sorted by UUID `variant_id`; each item includes UUID `variant_id`, integer
   `quantity`, trimmed-or-null `processing_preset_id`, sorted/deduplicated
   `processing_option_ids`, and trimmed-or-null `processing_note` truncated to 500
-  characters.
+  PostgreSQL text characters.
 
 Duplicate `variant_id` inputs are rejected. JSON object key order and incoming item
 or option array order therefore cannot make an equivalent checkout different.

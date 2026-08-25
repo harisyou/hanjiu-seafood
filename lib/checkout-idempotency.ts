@@ -23,9 +23,16 @@ function normalizedText(value: string | null | undefined) {
   return value?.trim() || null;
 }
 
+// PostgreSQL left(text, n) counts text characters, not JavaScript UTF-16 code units.
+// Array.from keeps astral Unicode characters intact so browser retry identity matches
+// the server's canonical payload even for emoji or non-BMP customer notes.
+function postgresLeft(value: string, length: number) {
+  return Array.from(value).slice(0, length).join("");
+}
+
 export function canonicalizeCheckoutRequest(input: CheckoutFingerprintInput) {
   return {
-    customer_name: input.customer_name.trim(),
+    customer_name: postgresLeft(input.customer_name.trim(), 100) || null,
     phone: input.phone.replace(/\D/g, ""),
     email: normalizedText(input.email)?.toLowerCase() || null,
     fulfillment: input.fulfillment,
@@ -36,9 +43,11 @@ export function canonicalizeCheckoutRequest(input: CheckoutFingerprintInput) {
         quantity: Number(item.quantity),
         processing_preset_id: normalizedText(item.processing_preset_id),
         processing_option_ids: [...new Set(item.processing_option_ids || [])].sort(),
-        processing_note: normalizedText(item.processing_note)?.slice(0, 500) || null
+        processing_note: normalizedText(item.processing_note) ? postgresLeft(normalizedText(item.processing_note)!, 500) : null
       }))
-      .sort((left, right) => left.variant_id.localeCompare(right.variant_id))
+      // Canonical UUIDs are lowercase ASCII hex. Code-unit ordering therefore matches
+      // PostgreSQL UUID ordering without locale-dependent localeCompare behavior.
+      .sort((left, right) => left.variant_id < right.variant_id ? -1 : left.variant_id > right.variant_id ? 1 : 0)
   };
 }
 
