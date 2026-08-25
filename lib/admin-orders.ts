@@ -6,9 +6,14 @@ export type OrderPayment = {
   amount: number;
   payment_method: "cash" | "bank_transfer" | "other";
   paid_at: string;
+  actor_id: string | null;
+  attempt_number: number;
+  idempotency_key: string | null;
 };
 
 export type OrderPaymentReversal = {
+  id: string;
+  payment_id: string;
   amount: number;
   reason: string;
   reversed_at: string;
@@ -119,4 +124,3 @@ export function parseOrderNote(note: string | null) {
 export function formatOrderTime(value: string, includeDate = false) {
   return new Intl.DateTimeFormat("zh-TW", includeDate ? { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" } : { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
 }
-

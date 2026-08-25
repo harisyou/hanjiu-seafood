@@ -50,23 +50,22 @@ test("the database rejects direct payment-status changes outside the payment RPC
   assert.match(migration, /grant execute on function public\.admin_record_order_payment\(uuid, integer, text\) to authenticated/);
 });
 
-test("admin detail independently reloads the authoritative payment record after a successful RPC", () => {
-  assert.match(detailPage, /from\("order_payments"\)\.select\("id,amount,payment_method,paid_at"\)\.eq\("order_id", orderId\)\.maybeSingle\(\)/);
-  assert.match(detailPage, /setPayment\(paymentResult\.error \|\| !paymentResult\.data \? null : paymentResult\.data as OrderPayment\)/);
+test("admin detail independently reloads authoritative payment facts after a successful RPC", () => {
+  assert.match(detailPage, /from\("order_payments"\)\.select\("id,amount,payment_method,paid_at,actor_id,attempt_number,idempotency_key"\)\.eq\("order_id", orderId\)\.order\("attempt_number", \{ ascending: false \}\)/);
+  assert.match(detailPage, /setPayments\(nextPayments\)/);
   assert.doesNotMatch(detailPage, /order_payments\(\*\)/);
 });
 
 test("payment rendering prioritizes an authoritative record over all unpaid and historical states", () => {
-  assert.match(detailPage, /\{payment \? <>\{paymentReversal/);
-  assert.match(detailPage, /paymentReversal \? "未付款（原收款已撤銷）" : "已付款"/);
-  assert.match(detailPage, /<\/> : canRecordPayment \? <>/);
-  assert.match(detailPage, /const canRecordPayment = !isDraft && !isCancelled && hasTotalsSnapshot && order\.payment_status === "unpaid"/);
+  assert.match(detailPage, /paymentAttempts\.length > 0/);
+  assert.match(detailPage, /Payment #\{payment\.attempt_number\}/);
+  assert.match(detailPage, /const canRecordPayment = !isDraft && !isCancelled && hasTotalsSnapshot && order\.payment_status === "unpaid" && !activePayment/);
   assert.match(detailPage, /此歷史訂單尚無金額 snapshot，不能確認收款。/);
 });
 
 test("admin detail replaces direct payment-status editing with explicit payment confirmation", () => {
-  assert.match(detailPage, /supabase\.rpc\("admin_record_order_payment", \{ p_order_id: order\.id, p_amount: orderTotal\(order\), p_payment_method: paymentMethod \}\)/);
-  assert.match(detailPage, /確認後會記錄實收金額與付款方式，並將付款狀態改為已付款。/);
+  assert.match(detailPage, /supabase\.rpc\("admin_record_order_payment", \{ p_order_id: order\.id, p_amount: orderTotal\(order\), p_payment_method: paymentMethod, p_idempotency_key: idempotencyKey \}\)/);
+  assert.match(detailPage, /確認後會建立新的不可修改收款 attempt/);
   assert.match(detailPage, /草稿訂單不能確認收款。/);
   assert.match(detailPage, /已取消訂單不能確認收款。/);
   assert.match(detailPage, /此歷史訂單尚無金額 snapshot，不能確認收款。/);

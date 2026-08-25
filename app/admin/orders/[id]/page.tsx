@@ -59,7 +59,12 @@ function errorMessage(message: string) {
     payment_already_reversed: "此筆收款已撤銷，不能再次撤銷。",
     order_not_paid: "只有已付款訂單可以撤銷收款。",
     cancelled_order_payment_reversal_not_allowed: "已取消訂單不得撤銷收款。",
-    paid_order_requires_payment_reversal: "已付款訂單必須先撤銷收款，才能取消。"
+    paid_order_requires_payment_reversal: "已付款訂單必須先撤銷收款，才能取消。",
+    payment_idempotency_key_required: "此次收款識別碼遺失，請重新確認收款。",
+    payment_idempotency_conflict: "此收款操作與先前請求不一致，請重新整理後再試。",
+    active_payment_exists: "此訂單已有有效收款紀錄，不能再次確認收款。",
+    active_payment_not_found: "找不到可撤銷的有效收款紀錄。",
+    active_payment_requires_reversal: "此訂單仍有有效收款，必須先撤銷才能取消。"
   };
   return Object.entries(messages).find(([code]) => message.includes(code))?.[1] || "操作失敗，請稍後再試。";
 }
@@ -71,8 +76,8 @@ export default function AdminOrderDetailPage() {
   const [user, setUser] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [order, setOrder] = useState<AdminOrder | null>(null);
-  const [payment, setPayment] = useState<OrderPayment | null>(null);
-  const [paymentReversal, setPaymentReversal] = useState<OrderPaymentReversal | null>(null);
+  const [payments, setPayments] = useState<OrderPayment[]>([]);
+  const [paymentReversals, setPaymentReversals] = useState<OrderPaymentReversal[]>([]);
   const [sourceRequest, setSourceRequest] = useState<FishRequest | null>(null);
   const [sourceFishName, setSourceFishName] = useState("");
   const [sourceRequestUnavailable, setSourceRequestUnavailable] = useState(false);
@@ -89,6 +94,7 @@ export default function AdminOrderDetailPage() {
   const [discountAmount, setDiscountAmount] = useState("0");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [confirmingPayment, setConfirmingPayment] = useState(false);
+  const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState<string | null>(null);
   const [reversingPayment, setReversingPayment] = useState(false);
   const [reversalReason, setReversalReason] = useState("");
 
@@ -97,10 +103,12 @@ export default function AdminOrderDetailPage() {
     if (error || !data) { setNotice("找不到訂單，或目前沒有讀取權限。"); return; }
     const nextOrder = data as AdminOrder;
     setOrder(nextOrder);
-    const paymentResult = await supabase.from("order_payments").select("id,amount,payment_method,paid_at").eq("order_id", orderId).maybeSingle();
-    setPayment(paymentResult.error || !paymentResult.data ? null : paymentResult.data as OrderPayment);
-    const reversalResult = paymentResult.data?.id ? await supabase.from("order_payment_reversals").select("amount,reason,reversed_at,actor_id").eq("payment_id", paymentResult.data.id).maybeSingle() : null;
-    setPaymentReversal(!reversalResult || reversalResult.error || !reversalResult.data ? null : reversalResult.data as OrderPaymentReversal);
+    const paymentResult = await supabase.from("order_payments").select("id,amount,payment_method,paid_at,actor_id,attempt_number,idempotency_key").eq("order_id", orderId).order("attempt_number", { ascending: false });
+    const nextPayments = paymentResult.error || !paymentResult.data ? [] : paymentResult.data as OrderPayment[];
+    setPayments(nextPayments);
+    const paymentIds = nextPayments.map((payment) => payment.id);
+    const reversalResult = paymentIds.length ? await supabase.from("order_payment_reversals").select("id,payment_id,amount,reason,reversed_at,actor_id").in("payment_id", paymentIds) : null;
+    setPaymentReversals(!reversalResult || reversalResult.error || !reversalResult.data ? [] : reversalResult.data as OrderPaymentReversal[]);
     setShippingFee(String(nextOrder.shipping_fee ?? 0));
     setDiscountAmount(String(nextOrder.discount_amount ?? 0));
     setSourceRequest(null); setSourceFishName(""); setSourceRequestUnavailable(false);
@@ -214,11 +222,18 @@ export default function AdminOrderDetailPage() {
 
   async function recordPayment() {
     if (!order || busy) return;
+    const idempotencyKey = paymentIdempotencyKey || crypto.randomUUID();
+    if (!paymentIdempotencyKey) setPaymentIdempotencyKey(idempotencyKey);
     setBusy(true); setNotice("");
-    const { error } = await supabase.rpc("admin_record_order_payment", { p_order_id: order.id, p_amount: orderTotal(order), p_payment_method: paymentMethod });
+    const { error } = await supabase.rpc("admin_record_order_payment", { p_order_id: order.id, p_amount: orderTotal(order), p_payment_method: paymentMethod, p_idempotency_key: idempotencyKey });
     setBusy(false); setConfirmingPayment(false);
     if (error) setNotice(errorMessage(error.message));
-    else { setNotice("收款已記錄，付款狀態已更新為已付款。"); await loadOrder(); }
+    else { setPaymentIdempotencyKey(null); setNotice("收款已記錄，付款狀態已更新為已付款。"); await loadOrder(); }
+  }
+
+  function beginPaymentConfirmation() {
+    setPaymentIdempotencyKey(crypto.randomUUID());
+    setConfirmingPayment(true);
   }
 
   async function reversePayment() {
@@ -239,9 +254,12 @@ export default function AdminOrderDetailPage() {
   const item = order.order_items[0] as AdminOrderItem | undefined;
   const isDraft = order.status === "draft";
   const isCancelled = order.status === "cancelled";
-  const canCancel = !isDraft && !isCancelled && order.payment_status !== "paid";
   const hasTotalsSnapshot = order.subtotal !== null && order.subtotal !== undefined;
-  const canRecordPayment = !isDraft && !isCancelled && hasTotalsSnapshot && order.payment_status === "unpaid";
+  const reversalByPaymentId = new Map(paymentReversals.map((reversal) => [reversal.payment_id, reversal]));
+  const paymentAttempts = payments.map((payment) => ({ payment, reversal: reversalByPaymentId.get(payment.id) || null }));
+  const activePayment = paymentAttempts.find((attempt) => !attempt.reversal) || null;
+  const canCancel = !isDraft && !isCancelled && order.payment_status !== "paid" && !activePayment;
+  const canRecordPayment = !isDraft && !isCancelled && hasTotalsSnapshot && order.payment_status === "unpaid" && !activePayment;
   const editableOrderStatusOptions = orderStatusOptions.filter((option) => option.value !== "cancelled");
   const canConfirm = Boolean(order.fulfillment && order.processing && item && order.order_items.length === 1);
   const selectedPreset = presets.find((preset) => preset.id === draftForm.presetId);
@@ -256,7 +274,25 @@ export default function AdminOrderDetailPage() {
       <article className="panel detailCustomer"><header><div><small>建立時間</small><strong>{formatOrderTime(order.created_at, true)}</strong></div><div><small>應收總額</small><strong className="detailTotal">NT${orderTotal(order).toLocaleString("zh-TW")}</strong></div></header><h2>{order.customer_name}</h2><dl><div><dt>電話</dt><dd><a href={"tel:" + order.phone}>{order.phone}</a></dd></div>{order.email && <div><dt>Email</dt><dd><a href={"mailto:" + order.email}>{order.email}</a></dd></div>}</dl><div className="quickContact"><a className="buttonLink" href={"tel:" + order.phone}>撥打電話</a>{order.email && <a className="buttonLink secondaryAdminAction" href={"mailto:" + order.email}>寄 Email</a>}{order.customer_id && <Link className="buttonLink secondaryAdminAction" href={"/admin/customers/" + order.customer_id}>查看客戶</Link>}</div></article>
       <article className="panel detailDelivery"><h2>配送資訊</h2><dl><div><dt>配送方式</dt><dd>{deliveryLabel(order.fulfillment)}</dd></div>{Object.entries(parsedNote.details).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>{isDraft && <p className="draftOrderNotice">草稿尚未確認配送與魚貨處理方式，也不代表已保留庫存。</p>}{parsedNote.customerNote && <section className="customerNote"><strong>📝 客人備註</strong><p>{parsedNote.customerNote}</p></section>}</article>
       <article className="panel detailTotals"><h2>訂單金額</h2>{hasTotalsSnapshot ? <><dl><div><dt>商品小計</dt><dd>NT${orderSubtotal(order).toLocaleString("zh-TW")}</dd></div><div><dt>運費</dt><dd>NT${(order.shipping_fee || 0).toLocaleString("zh-TW")}</dd></div><div><dt>折扣</dt><dd>-NT${(order.discount_amount || 0).toLocaleString("zh-TW")}</dd></div><div><dt>應收總額</dt><dd><strong>NT${orderTotal(order).toLocaleString("zh-TW")}</strong></dd></div></dl>{order.payment_status === "paid" ? <p className="notice">此訂單已記錄收款，金額已鎖定。若需修改運費或折扣，請先撤銷收款。</p> : !isCancelled && <div className="orderTotalsEditor"><label>運費<input type="number" min="0" step="1" value={shippingFee} disabled={busy} onChange={(event) => setShippingFee(event.target.value)} /></label><label>折扣<input type="number" min="0" step="1" value={discountAmount} disabled={busy} onChange={(event) => setDiscountAmount(event.target.value)} /></label><button type="button" disabled={busy} onClick={saveOrderTotals}>{busy ? "儲存中…" : "儲存金額調整"}</button></div>}</> : <p className="notice">此歷史訂單尚無 F003-14 金額 snapshot，維持原始品項價格資料，不會自動回填。</p>}</article>
-      <article className="panel detailPayment"><h2>收款紀錄</h2>{payment ? <>{paymentReversal && <p className="notice"><strong>此筆收款已撤銷</strong></p>}<dl><div><dt>付款狀態</dt><dd>{paymentReversal ? "未付款（原收款已撤銷）" : "已付款"}</dd></div><div><dt>{paymentReversal ? "原實收金額" : "實收金額"}</dt><dd>NT${payment.amount.toLocaleString("zh-TW")}</dd></div><div><dt>{paymentReversal ? "原付款方式" : "付款方式"}</dt><dd>{{ cash: "現金", bank_transfer: "銀行轉帳", other: "其他" }[payment.payment_method]}</dd></div><div><dt>{paymentReversal ? "原付款時間" : "付款時間"}</dt><dd>{formatOrderTime(payment.paid_at, true)}</dd></div>{paymentReversal && <><div><dt>撤銷時間</dt><dd>{formatOrderTime(paymentReversal.reversed_at, true)}</dd></div><div><dt>撤銷原因</dt><dd>{paymentReversal.reason}</dd></div></>}</dl>{!paymentReversal && !isCancelled && <button type="button" className="dangerSecondaryAction" disabled={busy} onClick={() => setReversingPayment(true)}>撤銷收款</button>}{reversingPayment && <section className="orderPaymentConfirm" aria-live="polite"><h3>確認撤銷收款</h3><p>撤銷後付款狀態會改回未付款，原收款與本次原因將永久保留。</p><label>撤銷原因 *<textarea rows={3} value={reversalReason} disabled={busy} onChange={(event) => setReversalReason(event.target.value)} placeholder="例如：客人取消、誤按收款、轉帳未實際入帳、其他" /></label><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setReversingPayment(false)}>返回</button><button type="button" className="dangerSecondaryAction" disabled={busy || !reversalReason.trim()} onClick={reversePayment}>{busy ? "撤銷中…" : "確認撤銷收款"}</button></section>}</> : canRecordPayment ? <><p>付款狀態：未付款</p><p>應收金額：<strong>NT${orderTotal(order).toLocaleString("zh-TW")}</strong></p><label>付款方式<select value={paymentMethod} disabled={busy} onChange={(event) => setPaymentMethod(event.target.value)}><option value="cash">現金</option><option value="bank_transfer">銀行轉帳</option><option value="other">其他</option></select></label><button type="button" disabled={busy} onClick={() => setConfirmingPayment(true)}>確認收款</button>{confirmingPayment && <section className="orderPaymentConfirm" aria-live="polite"><p>確認後會記錄實收金額與付款方式，並將付款狀態改為已付款。</p><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setConfirmingPayment(false)}>返回</button><button type="button" disabled={busy} onClick={recordPayment}>{busy ? "記錄中…" : "確認收款"}</button></section>}</> : <p className="notice">{isDraft ? "草稿訂單不能確認收款。" : isCancelled ? "已取消訂單不能確認收款。" : order.payment_status === "paid" ? "此歷史訂單沒有可撤銷的正式收款紀錄。" : "此歷史訂單尚無金額 snapshot，不能確認收款。"}</p>}</article>
+      <article className="panel detailPayment">
+        <h2>收款紀錄</h2>
+        {paymentAttempts.length > 0 && <section className="paymentAttemptHistory" aria-label="收款與撤銷歷程">
+          <h3>收款歷程</h3>
+          {paymentAttempts.map(({ payment, reversal }) => <article key={payment.id} className={reversal ? "paymentAttempt reversed" : "paymentAttempt active"}>
+            <header><strong>Payment #{payment.attempt_number}</strong><span>{reversal ? "已撤銷" : "有效收款"}</span></header>
+            <dl>
+              <div><dt>實收金額</dt><dd>NT${payment.amount.toLocaleString("zh-TW")}</dd></div>
+              <div><dt>付款方式</dt><dd>{{ cash: "現金", bank_transfer: "銀行轉帳", other: "其他" }[payment.payment_method]}</dd></div>
+              <div><dt>付款時間</dt><dd>{formatOrderTime(payment.paid_at, true)}</dd></div>
+              {payment.actor_id && <div><dt>收款操作人</dt><dd>{payment.actor_id}</dd></div>}
+              {reversal && <><div><dt>撤銷時間</dt><dd>{formatOrderTime(reversal.reversed_at, true)}</dd></div><div><dt>撤銷原因</dt><dd>{reversal.reason}</dd></div>{reversal.actor_id && <div><dt>撤銷操作人</dt><dd>{reversal.actor_id}</dd></div>}</>}
+            </dl>
+          </article>)}
+        </section>}
+        {activePayment && !isCancelled && <button type="button" className="dangerSecondaryAction" disabled={busy} onClick={() => setReversingPayment(true)}>撤銷目前有效收款</button>}
+        {reversingPayment && <section className="orderPaymentConfirm" aria-live="polite"><h3>確認撤銷收款</h3><p>撤銷後付款狀態會改回未付款；所有收款與撤銷紀錄會永久保留。</p><label>撤銷原因 *<textarea rows={3} value={reversalReason} disabled={busy} onChange={(event) => setReversalReason(event.target.value)} placeholder="例如：客人取消、誤按收款、轉帳未實際入帳、其他" /></label><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setReversingPayment(false)}>返回</button><button type="button" className="dangerSecondaryAction" disabled={busy || !reversalReason.trim()} onClick={reversePayment}>{busy ? "撤銷中…" : "確認撤銷收款"}</button></section>}
+        {canRecordPayment ? <section className="paymentRecordAction"><p>付款狀態：未付款</p><p>應收金額：<strong>NT${orderTotal(order).toLocaleString("zh-TW")}</strong></p><label>付款方式<select value={paymentMethod} disabled={busy} onChange={(event) => setPaymentMethod(event.target.value)}><option value="cash">現金</option><option value="bank_transfer">銀行轉帳</option><option value="other">其他</option></select></label><button type="button" disabled={busy} onClick={beginPaymentConfirmation}>確認收款</button>{confirmingPayment && <section className="orderPaymentConfirm" aria-live="polite"><p>確認後會建立新的不可修改收款 attempt，並將付款狀態改為已付款。</p><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setConfirmingPayment(false)}>返回</button><button type="button" disabled={busy} onClick={recordPayment}>{busy ? "記錄中…" : "確認收款"}</button></section>}</section> : !activePayment && <p className="notice">{isDraft ? "草稿訂單不能確認收款。" : isCancelled ? "已取消訂單不能確認收款。" : order.payment_status === "paid" ? "此歷史訂單沒有可撤銷的正式收款紀錄。" : "此歷史訂單尚無金額 snapshot，不能確認收款。"}</p>}
+      </article>
       <article className="panel detailStatuses"><h2>訂單狀態</h2><label>處理進度<select disabled={busy || isDraft || isCancelled} value={order.status} onChange={(event) => updateOrder({ status: event.target.value })}>{editableOrderStatusOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}{!editableOrderStatusOptions.some((option) => option.value === order.status) && <option value={order.status}>{orderStatusLabel(order.status)}</option>}</select></label>{isDraft && <small>草稿需先補齊配送與魚貨處理方式，不能使用正式訂單取消流程。</small>}{isCancelled && <small>此訂單已取消，庫存已補回，且不能恢復為其他狀態。</small>}<p>付款狀態：{paymentStatusLabel(order.payment_status)}</p><div className="statusSnapshot"><span>{orderStatusLabel(order.status)}</span><span>{paymentStatusLabel(order.payment_status)}</span></div>{canCancel && <div className="orderCancellationActions"><button type="button" className="dangerSecondaryAction" disabled={busy} onClick={() => setCancelling(true)}>取消訂單</button></div>}{cancelling && <section className="orderCancellationConfirm" aria-live="polite"><h3>確認取消訂單</h3><p>取消後，此訂單將標記為已取消；原本已扣除的庫存會依訂單規格與數量補回，並留下庫存異動紀錄。</p><p>此操作無法由此頁恢復，確認前請再次核對訂單內容。</p><div><button type="button" className="secondaryAdminAction" disabled={busy} onClick={() => setCancelling(false)}>返回</button><button type="button" className="dangerSecondaryAction" disabled={busy} onClick={cancelOrder}>{busy ? "取消中…" : "確認取消並補回庫存"}</button></div></section>}{notice && <p className="notice" aria-live="polite">{notice}</p>}</article>
     </section>
     <section className="panel detailItems"><h2>訂單商品</h2>{order.order_items.map((orderItem) => { const processing = processingSummary(orderItem); const subtotal = (orderItem.price || 0) * orderItem.quantity; return <article className="detailOrderItem" key={orderItem.id}><header><div><h3>{orderItem.product_name}</h3><p>{orderItem.variant_name || "未指定規格"}</p></div><strong>{subtotal.toLocaleString("zh-TW")}</strong></header><dl><div><dt>數量</dt><dd>{orderItem.quantity}</dd></div><div><dt>單價</dt><dd>{(orderItem.price || 0).toLocaleString("zh-TW")}</dd></div><div><dt>小計</dt><dd>{subtotal.toLocaleString("zh-TW")}</dd></div></dl><div className="detailProcessing"><strong>處理：{processing.name}</strong>{processing.extras.map((extra) => <span key={extra}>＋{extra}</span>)}{orderItem.processing_note && <span>其他處理需求：{orderItem.processing_note}</span>}</div></article>; })}</section>

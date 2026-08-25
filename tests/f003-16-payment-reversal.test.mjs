@@ -16,6 +16,10 @@ function functionDefinition(sql, name) {
   return sql.slice(start, end);
 }
 
+function normalizeSql(value) {
+  return value.replace(/\r\n/g, "\n");
+}
+
 test("reversals are append-only authoritative facts protected from direct clients", () => {
   assert.match(migration, /create table if not exists public\.order_payment_reversals/);
   assert.match(migration, /payment_id uuid not null unique references public\.order_payments\(id\) on delete restrict/);
@@ -70,22 +74,24 @@ test("F003-16 cancellation is byte-for-byte latest F003-13 plus only the paid gu
   const guard = "  if v_order.payment_status = 'paid' then raise exception 'paid_order_requires_payment_reversal'; end if;\n";
   const latest = functionDefinition(cancellationMigration, "admin_cancel_order");
   const revised = functionDefinition(migration, "admin_cancel_order");
-  assert.equal(revised.replace(guard, ""), latest);
+  assert.equal(normalizeSql(revised.replace(guard, "")), normalizeSql(latest));
   assert.equal(revised.split(guard).length, 2);
 });
 
 test("admin UI keeps the payment audit trail and requires explicit reason confirmation", () => {
-  assert.match(detail, /from\("order_payment_reversals"\)\.select\("amount,reason,reversed_at,actor_id"\)/);
+  assert.match(detail, /from\("order_payment_reversals"\)\.select\("id,payment_id,amount,reason,reversed_at,actor_id"\)/);
   assert.match(detail, /admin_reverse_order_payment/);
   assert.match(detail, /撤銷原因 \*/);
   assert.match(detail, /確認撤銷收款/);
-  assert.match(detail, /此筆收款已撤銷/);
-  assert.match(detail, /原實收金額/);
-  assert.match(detail, /原付款方式/);
-  assert.match(detail, /原付款時間/);
+  assert.match(detail, /Payment #\{payment\.attempt_number\}/);
+  assert.match(detail, /已撤銷/);
+  assert.match(detail, /有效收款/);
+  assert.match(detail, /實收金額/);
+  assert.match(detail, /付款方式/);
+  assert.match(detail, /付款時間/);
   assert.match(detail, /撤銷時間/);
   assert.match(detail, /此歷史訂單沒有可撤銷的正式收款紀錄/);
-  assert.match(detail, /!paymentReversal && !isCancelled/);
+  assert.match(detail, /activePayment && !isCancelled/);
 });
 
 test("historical paid orders without an authoritative payment cannot reverse or cancel", () => {

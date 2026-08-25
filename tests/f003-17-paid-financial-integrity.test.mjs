@@ -16,6 +16,10 @@ function functionDefinition(sql, name) {
   return sql.slice(start, end);
 }
 
+function normalizeSql(value) {
+  return value.replace(/\r\n/g, "\n");
+}
+
 test("migration is transactional, dependency documented, and never mutates history", () => {
   assert.match(migration, /^-- F003-17:[\s\S]*Depends on F003-13 through F003-16[\s\S]*\bbegin;/);
   assert.match(migration, /\bcommit;\s*$/);
@@ -44,7 +48,7 @@ test("F003-17 totals RPC is latest F003-14 plus only the paid guard", () => {
   const guard = "  if v_order.payment_status = 'paid' then raise exception 'paid_order_totals_locked'; end if;\n";
   const latest = functionDefinition(totalsMigration, "admin_update_order_totals");
   const revised = functionDefinition(migration, "admin_update_order_totals");
-  assert.equal(revised.replace(guard, ""), latest);
+  assert.equal(normalizeSql(revised.replace(guard, "")), normalizeSql(latest));
   assert.equal(revised.split(guard).length, 2);
 });
 
