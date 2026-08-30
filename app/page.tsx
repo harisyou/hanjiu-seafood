@@ -662,8 +662,7 @@ export default function HomePage() {
         <div className="heading"><div><small>TODAY&apos;S CATCH</small><h2>今日海鮮</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
         <section className="productFilters" aria-label="商品搜尋與篩選">
           <label className="productSearchField">
-            <span>商品搜尋</span>
-            <input type="search" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="搜尋商品名稱，例如：馬頭" aria-controls="product-grid" />
+            <input type="search" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="搜尋商品名稱，例如：馬頭" aria-label="商品搜尋" aria-controls="product-grid" />
           </label>
           <div className="productCategoryChips" role="group" aria-label="商品分類">
             {PRODUCT_CATEGORIES.map((category) => <button type="button" key={category.id} className={selectedProductCategory === category.id ? "isActive" : ""} aria-pressed={selectedProductCategory === category.id} onClick={() => setSelectedProductCategory(category.id)}>{category.label}</button>)}

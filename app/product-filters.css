@@ -1,10 +1,10 @@
 .productFilters {
   display: grid;
-  grid-template-columns: minmax(220px, 360px) minmax(0, 1fr) auto;
-  gap: 12px 16px;
-  align-items: end;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
   max-width: 1200px;
-  margin: 0 auto 26px;
+  margin: 0 auto 32px;
 }
 
 .productSearchField,
@@ -12,7 +12,10 @@
   margin: 0;
 }
 
-.productSearchField > span,
+.productSearchField {
+  grid-column: 1 / -1;
+}
+
 .stockOnlyToggle > span {
   display: block;
   margin-bottom: 6px;
@@ -22,6 +25,7 @@
 }
 
 .productSearchField input {
+  width: min(480px, 100%);
   min-height: 46px;
   margin: 0;
   padding: 10px 14px;
@@ -30,6 +34,8 @@
 }
 
 .productCategoryChips {
+  grid-column: 1;
+  grid-row: 2;
   display: flex;
   min-width: 0;
   gap: 8px;
@@ -60,6 +66,8 @@
 }
 
 .stockOnlyToggle {
+  grid-column: 2;
+  grid-row: 2;
   display: inline-flex;
   min-height: 46px;
   align-items: center;
@@ -85,7 +93,8 @@
 }
 
 .productFilterReset {
-  grid-column: 1 / -1;
+  grid-column: 1;
+  grid-row: 3;
   justify-self: start;
   min-height: 40px;
   color: #526d67;
@@ -111,32 +120,30 @@
 }
 
 @media (max-width: 850px) {
-  .productFilters {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .productCategoryChips {
-    grid-column: 1 / -1;
-    grid-row: 2;
+  .productSearchField input {
+    width: min(420px, 100%);
   }
 }
 
 @media (max-width: 560px) {
   .productFilters {
     grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
-    margin-bottom: 22px;
+    gap: 12px;
+    margin-bottom: 28px;
   }
 
+  .productSearchField,
   .productSearchField input,
   .stockOnlyToggle {
+    width: 100%;
     min-height: 48px;
   }
 
   .productCategoryChips {
-    grid-column: auto;
-    grid-row: auto;
-    width: calc(100% + 2px);
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    padding-right: 2px;
   }
 
   .productCategoryChips button {
@@ -144,6 +151,13 @@
   }
 
   .stockOnlyToggle {
-    width: fit-content;
+    grid-column: 1;
+    grid-row: 3;
+    justify-content: flex-start;
+  }
+
+  .productFilterReset {
+    grid-column: 1;
+    grid-row: 4;
   }
 }
