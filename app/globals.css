@@ -138,6 +138,9 @@ nav{display:flex;justify-content:space-between;align-items:center}nav div{displa
 /* Production checkout hotfix */
 .headerCartSubtotal{white-space:nowrap}.priceTag{display:flex;flex-direction:column;gap:2px}.priceTag small{color:#61736f;font-size:11px;font-weight:700}.itemSubtotal{flex-direction:column!important;align-items:flex-start!important;gap:2px!important}.itemSubtotal span{color:#61736f;font-size:12px;font-weight:700}.checkoutFields label>small,.fishRequestFields label>small{margin-top:4px;color:#657773;font-size:12px;font-weight:500}
 
+/* F004-3 checkout delivery slots and payment summary */
+.checkoutFields select{width:100%;min-height:48px;padding:11px 38px 11px 12px;border:1px solid #bfd0cb;border-radius:10px;background:#fff;color:#173b38;font:inherit;appearance:auto}.checkoutFields select:focus-visible{outline:3px solid #82bdb3;outline-offset:2px;border-color:#0f5a52}.checkoutAmountSummary{display:grid;gap:10px;margin:26px 0 18px;padding:18px;border:1px solid #d7e3df;border-radius:14px;background:#f7faf8}.checkoutAmountSummary>div{display:flex;align-items:baseline;justify-content:space-between;gap:20px;color:#526661}.checkoutAmountSummary strong{color:#173b38;font-size:17px;font-variant-numeric:tabular-nums}.checkoutAmountSummary .checkoutPayableTotal{margin-top:4px;padding-top:14px;border-top:1px solid #d7e3df;color:#0f5a52;font-weight:800}.checkoutAmountSummary .checkoutPayableTotal strong{color:#0f5a52;font-size:23px}@media(max-width:600px){.checkoutAmountSummary{margin-top:22px;padding:16px}.checkoutAmountSummary strong{font-size:16px}.checkoutAmountSummary .checkoutPayableTotal strong{font-size:21px}}
+
 /* Storefront cart: restrained liquid-glass capsule. Scoped to avoid changing navigation. */
 .hero .headerCartButton{
   position:relative;
