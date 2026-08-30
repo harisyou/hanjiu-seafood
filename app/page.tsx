@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { formatPrice, ProcessingOption, ProcessingPreset, ProcessingPresetOption, Product, ProductProcessingOption, ProductProcessingPreset, ProductVariant } from "@/lib/catalog";
+import { filterProducts, normalizeProductSearch, PRODUCT_CATEGORIES, ProductCategory } from "@/lib/product-filters";
 import { isValidEmail, isValidTaiwanMobile, normalizeTaiwanMobile, taipeiCurrentTime, taipeiToday, validateTaipeiDateTime } from "@/lib/customer-validation";
 import { checkoutRequestFingerprint, checkoutRetryKey, clearCheckoutRetryKey } from "@/lib/checkout-idempotency";
 import FishRequestForm from "./fish-request-form";
@@ -76,6 +77,9 @@ export default function HomePage() {
   const supabase = useMemo(() => createClient(), []);
   const [products, setProducts] = useState<Product[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
+  const [productSearch, setProductSearch] = useState("");
+  const [selectedProductCategory, setSelectedProductCategory] = useState<ProductCategory>("all");
+  const [inStockOnly, setInStockOnly] = useState(false);
   const [processingOptions, setProcessingOptions] = useState<ProcessingOption[]>([]);
   const [processingPresets, setProcessingPresets] = useState<ProcessingPreset[]>([]);
   const [processingPresetOptions, setProcessingPresetOptions] = useState<ProcessingPresetOption[]>([]);
@@ -605,6 +609,11 @@ export default function HomePage() {
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const filteredProducts = useMemo(
+    () => filterProducts(products, variants, { query: productSearch, category: selectedProductCategory, inStockOnly }),
+    [inStockOnly, productSearch, products, selectedProductCategory, variants]
+  );
+  const filtersActive = Boolean(normalizeProductSearch(productSearch) || selectedProductCategory !== "all" || inStockOnly);
   const shippingThreshold = 2500;
   const shippingRemaining = Math.max(0, shippingThreshold - total);
   const shippingProgress = Math.min(100, (total / shippingThreshold) * 100);
@@ -651,8 +660,22 @@ export default function HomePage() {
 </header>
       <section className="content">
         <div className="heading"><div><small>TODAY&apos;S CATCH</small><h2>今日海鮮</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
-        <div className="grid">
-          {products.map((product) => {
+        <section className="productFilters" aria-label="商品搜尋與篩選">
+          <label className="productSearchField">
+            <span>商品搜尋</span>
+            <input type="search" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="搜尋商品名稱，例如：馬頭" aria-controls="product-grid" />
+          </label>
+          <div className="productCategoryChips" role="group" aria-label="商品分類">
+            {PRODUCT_CATEGORIES.map((category) => <button type="button" key={category.id} className={selectedProductCategory === category.id ? "isActive" : ""} aria-pressed={selectedProductCategory === category.id} onClick={() => setSelectedProductCategory(category.id)}>{category.label}</button>)}
+          </div>
+          <label className="stockOnlyToggle">
+            <input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} />
+            <span>只看有貨</span>
+          </label>
+          <button type="button" className="productFilterReset" disabled={!filtersActive} onClick={() => { setProductSearch(""); setSelectedProductCategory("all"); setInStockOnly(false); }}>查看全部商品</button>
+        </section>
+        {filteredProducts.length === 0 ? <div className="productFilterEmpty" role="status" aria-live="polite"><p>目前沒有符合條件的商品</p><button type="button" className="productFilterReset" onClick={() => { setProductSearch(""); setSelectedProductCategory("all"); setInStockOnly(false); }}>清除篩選</button></div> : <div className="grid" id="product-grid">
+          {filteredProducts.map((product) => {
             const productVariants = variants.filter((variant) => variant.product_id === product.id);
             const displayVariants = productVariants.filter((variant) => variant.active);
             const purchasableVariants = displayVariants.filter((variant) => getPurchaseLimit(variant) > 0 && product.status === "available");
@@ -720,7 +743,7 @@ export default function HomePage() {
               </div>
             </article>;
           })}
-        </div>
+        </div>}
       </section>
       <section id="fish-request" className="fishRequestSection">
         <div className="fishRequestShell">
