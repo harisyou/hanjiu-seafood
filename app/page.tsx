@@ -671,7 +671,7 @@ export default function HomePage() {
             <input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} />
             <span>只看有貨</span>
           </label>
-          <button type="button" className="productFilterReset" disabled={!filtersActive} onClick={() => { setProductSearch(""); setSelectedProductCategory("all"); setInStockOnly(false); }}>查看全部商品</button>
+          <button type="button" className="productFilterReset" disabled={!filtersActive} onClick={() => { setProductSearch(""); setSelectedProductCategory("all"); setInStockOnly(false); }}>清除篩選</button>
         </section>
         {filteredProducts.length === 0 ? <div className="productFilterEmpty" role="status" aria-live="polite"><p>目前沒有符合條件的商品</p><button type="button" className="productFilterReset" onClick={() => { setProductSearch(""); setSelectedProductCategory("all"); setInStockOnly(false); }}>清除篩選</button></div> : <div className="grid" id="product-grid">
           {filteredProducts.map((product) => {
