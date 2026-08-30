@@ -1,0 +1,172 @@
+/* Homepage-only presentation overrides, loaded after the legacy global rules. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* Keep the navigation transparent over the banner: the hero image starts at y = 0. */
+.hero {
+  position: relative;
+  padding: 0;
+}
+
+.hero nav {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  padding: 20px 6vw;
+  background: transparent;
+  color: #fff;
+  text-shadow: 0 1px 12px rgba(4, 38, 59, 0.34);
+}
+
+.hero nav a {
+  color: #fff;
+}
+
+.heroPicture {
+  display: block;
+  width: 100%;
+  line-height: 0;
+}
+
+.heroPicture img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* A deliberately thick, white-tinted liquid-glass capsule for the cart only. */
+.hero .headerCartButton {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 58px;
+  padding: 0 23px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-top-color: rgba(255, 255, 255, 0.98);
+  border-bottom-color: rgba(216, 248, 255, 0.47);
+  border-radius: 999px;
+  background:
+    radial-gradient(125% 155% at 50% -48%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.33) 40%, rgba(225, 247, 255, 0.11) 73%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.18) 48%, rgba(224, 248, 255, 0.28));
+  color: #faffff;
+  font-size: 17px;
+  font-weight: 850;
+  letter-spacing: 0.015em;
+  text-shadow: 0 1px 2px rgba(6, 63, 82, 0.36);
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(24px) saturate(175%) brightness(1.14);
+  backdrop-filter: blur(24px) saturate(175%) brightness(1.14);
+  box-shadow:
+    inset 0 2px 1px rgba(255, 255, 255, 0.93),
+    inset 0 10px 20px rgba(255, 255, 255, 0.22),
+    inset 0 -9px 14px rgba(19, 129, 156, 0.22),
+    inset 0 -2px 3px rgba(6, 70, 91, 0.2),
+    0 10px 23px rgba(0, 52, 82, 0.25),
+    0 3px 7px rgba(0, 32, 61, 0.2);
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+
+.hero .headerCartButton::before {
+  position: absolute;
+  z-index: 0;
+  inset: 1px 4px 43%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.08));
+  content: "";
+  pointer-events: none;
+}
+
+.hero .headerCartButton::after {
+  position: absolute;
+  z-index: 0;
+  inset: 24% 11% -55%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.62), rgba(199, 242, 255, 0.11) 53%, transparent 74%);
+  filter: blur(7px);
+  content: "";
+  pointer-events: none;
+}
+
+.hero .headerCartButton .cartIcon {
+  margin-right: 2px;
+  font-size: 21px;
+  line-height: 1;
+}
+
+.hero .headerCartButton .cartIcon,
+.hero .headerCartButton .headerCartQuantity,
+.hero .headerCartButton .headerCartDivider,
+.hero .headerCartButton .headerCartSubtotal {
+  position: relative;
+  z-index: 1;
+}
+
+.hero .headerCartButton .headerCartQuantity {
+  font-variant-numeric: tabular-nums;
+}
+
+.hero .headerCartButton .headerCartDivider {
+  opacity: 0.72;
+}
+
+.hero .headerCartButton .headerCartSubtotal {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hero .headerCartButton:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    inset 0 2px 1px rgba(255, 255, 255, 0.97),
+    inset 0 10px 20px rgba(255, 255, 255, 0.28),
+    inset 0 -9px 14px rgba(19, 129, 156, 0.2),
+    inset 0 -2px 3px rgba(6, 70, 91, 0.18),
+    0 14px 28px rgba(0, 52, 82, 0.3),
+    0 4px 8px rgba(0, 32, 61, 0.2);
+}
+
+.hero .headerCartButton:active {
+  transform: translateY(1px) scale(0.985);
+  box-shadow:
+    inset 0 2px 5px rgba(6, 70, 91, 0.22),
+    inset 0 -2px 2px rgba(255, 255, 255, 0.56),
+    0 5px 12px rgba(0, 52, 82, 0.2);
+}
+
+.hero .headerCartButton:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.96);
+  outline-offset: 3px;
+}
+
+@media (max-width: 560px) {
+  .hero nav {
+    padding: 13px 4vw;
+  }
+
+  .hero .headerCartButton {
+    min-height: 48px;
+    padding: 0 15px;
+    font-size: 15px;
+  }
+
+  .hero .headerCartButton .cartIcon {
+    font-size: 18px;
+  }
+
+  .hero .headerCartButton .headerCartSubtotal {
+    font-size: 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero .headerCartButton {
+    transition: none;
+  }
+}

@@ -1,4 +1,5 @@
 import "./globals.css";
+import "./liquid-glass-cart.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {

@@ -640,9 +640,9 @@ export default function HomePage() {
           aria-hidden="true"
         >
           🛒
-        </span>{" "}
-        {totalQuantity}
-        <span aria-hidden="true">｜</span>
+        </span>
+        <span className="headerCartQuantity">{totalQuantity}</span>
+        <span className="headerCartDivider" aria-hidden="true">｜</span>
         <span className="headerCartSubtotal">💰 {formatPrice(total)}</span>
       </button>
     </div>
