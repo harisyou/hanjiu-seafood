@@ -1,0 +1,174 @@
+.productFilters {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  justify-content: start;
+  gap: 16px 14px;
+  align-items: center;
+  max-width: 1200px;
+  margin: 0 auto 32px;
+}
+
+.productSearchField,
+.stockOnlyToggle {
+  margin: 0;
+}
+
+.productSearchField {
+  grid-column: 1 / -1;
+}
+
+.stockOnlyToggle > span {
+  display: block;
+  margin-bottom: 6px;
+  color: #345d56;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.productSearchField input {
+  width: min(480px, 100%);
+  min-height: 46px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.productCategoryChips {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  width: max-content;
+  max-width: min(100%, 580px);
+  min-width: 0;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.productCategoryChips button,
+.productFilterReset {
+  width: auto;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid #c9dbd6;
+  border-radius: 999px;
+  background: #fff;
+  color: #315d54;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.productCategoryChips button.isActive {
+  border-color: #0f5a52;
+  background: #e8f2ef;
+  color: #0f5a52;
+}
+
+.stockOnlyToggle {
+  grid-column: 2;
+  grid-row: 2;
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  border: 1px solid #c9dbd6;
+  border-radius: 999px;
+  background: #fff;
+  color: #315d54;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.stockOnlyToggle > span {
+  margin: 0;
+}
+
+.stockOnlyToggle input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: #0f5a52;
+}
+
+.productFilterReset {
+  grid-column: 1;
+  grid-row: 3;
+  justify-self: start;
+  min-height: 40px;
+  color: #526d67;
+}
+
+.productFilterReset:disabled {
+  display: none;
+}
+
+.productFilterEmpty {
+  max-width: 620px;
+  margin: 12px auto 0;
+  padding: 34px 24px;
+  border: 1px dashed #bfd4cf;
+  border-radius: 18px;
+  background: #fff;
+  text-align: center;
+}
+
+.productFilterEmpty p {
+  margin: 0 0 16px;
+  color: #526d67;
+}
+
+@media (max-width: 850px) {
+  .productFilters {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .productCategoryChips {
+    width: 100%;
+  }
+
+  .productSearchField input {
+    width: min(420px, 100%);
+  }
+}
+
+@media (max-width: 560px) {
+  .productFilters {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .productSearchField,
+  .productSearchField input,
+  .stockOnlyToggle {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  .productCategoryChips {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    padding-right: 2px;
+  }
+
+  .productCategoryChips button {
+    min-height: 44px;
+  }
+
+  .stockOnlyToggle {
+    grid-column: 1;
+    grid-row: 3;
+    justify-content: flex-start;
+  }
+
+  .productFilterReset {
+    grid-column: 1;
+    grid-row: 4;
+  }
+}
