@@ -622,7 +622,7 @@ export default function HomePage() {
 
   return (
     <main>
-      <header className="hero"><nav><strong>漢久海鮮</strong><div><Link href="/admin">後台管理</Link><button className="headerCartButton" type="button" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><span className={cartBounceKey ? "cartIcon cartIconBounce" : "cartIcon"} key={cartBounceKey} aria-hidden="true">🛒</span> {totalQuantity} <span aria-hidden="true">｜</span> <span className="headerCartSubtotal">💰 {formatPrice(total)}</span></button></div></nav><section><p>每日嚴選，新鮮直送</p><h1>今天，吃好魚。</h1><p>挑選想要的商品與規格，送出訂單後由我們與你確認取貨細節。</p></section></header>
+      <header className="hero"><nav><strong>韓九海鮮</strong><div><Link href="/admin">後台管理</Link><button className="headerCartButton" type="button" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><span className={cartBounceKey ? "cartIcon cartIconBounce" : "cartIcon"} key={cartBounceKey} aria-hidden="true">🛒</span> {totalQuantity} <span aria-hidden="true">｜</span> <span className="headerCartSubtotal">💰 {formatPrice(total)}</span></button></div></nav><section><p>每日嚴選，新鮮直送</p><h1>今天，吃好魚。</h1><p>挑選想要的商品與規格，送出訂單後由我們與你確認取貨細節。</p></section></header>
       <section className="content">
         <div className="heading"><div><small>TODAY&apos;S CATCH</small><h2>今日海鮮</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
         <div className="grid">
