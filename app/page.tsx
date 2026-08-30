@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { formatPrice, ProcessingOption, ProcessingPreset, ProcessingPresetOption, Product, ProductProcessingOption, ProductProcessingPreset, ProductVariant } from "@/lib/catalog";
@@ -625,8 +624,6 @@ export default function HomePage() {
       <header className="hero">
   <nav>
     <strong>韓九海鮮</strong>
-    <div>
-      <Link href="/admin">後台管理</Link>
       <button
         className="headerCartButton"
         type="button"
@@ -645,7 +642,6 @@ export default function HomePage() {
         <span className="headerCartDivider" aria-hidden="true">｜</span>
         <span className="headerCartSubtotal">💰 {formatPrice(total)}</span>
       </button>
-    </div>
   </nav>
 
   <picture className="heroPicture">
