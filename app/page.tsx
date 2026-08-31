@@ -6,6 +6,7 @@ import { formatPrice, ProcessingOption, ProcessingPreset, ProcessingPresetOption
 import { filterProducts, normalizeProductSearch, PRODUCT_CATEGORIES, ProductCategory } from "@/lib/product-filters";
 import { isValidEmail, isValidTaiwanMobile, normalizeTaiwanMobile, taipeiCurrentTime, taipeiToday, validateTaipeiDateTime } from "@/lib/customer-validation";
 import { checkoutRequestFingerprint, checkoutRetryKey, clearCheckoutRetryKey } from "@/lib/checkout-idempotency";
+import { activeProductProcessingOptionConfigs, activeProductProcessingPresetConfigs, validProcessingSelection } from "@/lib/processing-availability";
 import FishRequestForm from "./fish-request-form";
 
 type CartItem = {
@@ -186,13 +187,11 @@ export default function HomePage() {
         usedInventory.set(variant.id, (usedInventory.get(variant.id) || 0) + quantity);
 
         if (!product.processing_enabled) return [{ ...item, cart_key: processingSignature(variant.id, { presetId: "none", optionIds: [], note: "" }), product_name: product.name, variant_name: variant.name, price: variant.price, quantity, processing_preset_id: "none", processing_preset_name: "不處理", processing_option_ids: [], processing_option_names: [], processing_note: "" }];
-        const allowedOptionIds = new Set(productProcessingOptions.filter((config) => config.product_id === product.id).map((config) => config.processing_option_id));
-        const optionIds = (Array.isArray(item.processing_option_ids) ? item.processing_option_ids : []).filter((id) => allowedOptionIds.has(id)).sort();
-        const allowedPresetIds = new Set(productProcessingPresets.filter((config) => config.product_id === product.id).map((config) => config.preset_id));
-        const presetId = item.processing_preset_id && allowedPresetIds.has(item.processing_preset_id) ? item.processing_preset_id : null;
-        const selection = { presetId, optionIds, note: String(item.processing_note || "").trim() };
+        const presetConfigs = activeProductProcessingPresetConfigs(product.id, productProcessingPresets, processingPresets);
+        const optionConfigs = activeProductProcessingOptionConfigs(product.id, productProcessingOptions, processingOptions);
+        const selection = validProcessingSelection({ presetId: item.processing_preset_id, optionIds: Array.isArray(item.processing_option_ids) ? item.processing_option_ids : [], note: item.processing_note || "" }, presetConfigs, optionConfigs);
         const display = processingDisplay(product.id, selection);
-        return [{ ...item, cart_key: processingSignature(variant.id, selection), product_name: product.name, variant_name: variant.name, price: variant.price, quantity, processing_preset_id: presetId, processing_preset_name: display.presetName, processing_option_ids: optionIds, processing_option_names: display.optionNames, processing_note: selection.note }];
+        return [{ ...item, cart_key: processingSignature(variant.id, selection), product_name: product.name, variant_name: variant.name, price: variant.price, quantity, processing_preset_id: selection.presetId, processing_preset_name: display.presetName, processing_option_ids: selection.optionIds, processing_option_names: display.optionNames, processing_note: selection.note }];
       });
       setCart(restored);
     } catch {
@@ -254,9 +253,17 @@ export default function HomePage() {
       const next = { ...current };
       let changed = false;
       products.forEach((product) => {
-        if (next[product.id]) return;
-        const availablePresets = productProcessingPresets.filter((item) => item.product_id === product.id);
-        const availableOptions = productProcessingOptions.filter((item) => item.product_id === product.id);
+        const availablePresets = activeProductProcessingPresetConfigs(product.id, productProcessingPresets, processingPresets);
+        const availableOptions = activeProductProcessingOptionConfigs(product.id, productProcessingOptions, processingOptions);
+        const existing = next[product.id];
+        if (existing) {
+          const valid = validProcessingSelection(existing, availablePresets, availableOptions);
+          if (valid.presetId !== existing.presetId || valid.note !== existing.note || valid.optionIds.join(",") !== existing.optionIds.join(",")) {
+            next[product.id] = valid;
+            changed = true;
+          }
+          return;
+        }
         const defaultConfig = availablePresets.find((item) => item.is_default) || (availablePresets.length === 1 && availableOptions.length === 0 ? availablePresets[0] : null);
         if (!product.processing_enabled) {
           next[product.id] = { presetId: "none", optionIds: [], note: "" };
@@ -275,7 +282,7 @@ export default function HomePage() {
       });
       return changed ? next : current;
     });
-  }, [processingPresetOptions, productProcessingOptions, productProcessingPresets, products]);
+  }, [processingOptions, processingPresetOptions, processingPresets, productProcessingOptions, productProcessingPresets, products]);
 
   useEffect(() => {
     setSelectedQuantities((current) => {
@@ -343,7 +350,9 @@ export default function HomePage() {
       if (quantity > remainingPurchasable) {
         throw new Error(`購物車內已有 ${quantityAlreadyInCart} 隻，本次最多還可加入 ${remainingPurchasable} 隻`);
       }
-      const processingSelection = product.processing_enabled ? (productProcessing[product.id] || { presetId: null, optionIds: [], note: "" }) : { presetId: "none", optionIds: [], note: "" };
+      const processingSelection = product.processing_enabled
+        ? validProcessingSelection(productProcessing[product.id] || { presetId: null, optionIds: [], note: "" }, activeProductProcessingPresetConfigs(product.id, productProcessingPresets, processingPresets), activeProductProcessingOptionConfigs(product.id, productProcessingOptions, processingOptions))
+        : { presetId: "none", optionIds: [], note: "" };
       if (product.processing_enabled && !processingSelection.presetId && processingSelection.optionIds.length === 0) throw new Error("請選擇魚貨處理方式");
       const processing = processingDisplay(product.id, processingSelection);
       const cartKey = processingSignature(variant.id, processingSelection);
@@ -402,9 +411,10 @@ export default function HomePage() {
     setCart((items) => {
       const source = items.find((item) => item.cart_key === cartKey);
       if (!source) return items;
-      const display = processingDisplay(source.product_id, selection);
-      const nextKey = processingSignature(source.variant_id, selection);
-      const updated = { ...source, cart_key: nextKey, processing_preset_id: selection.presetId, processing_preset_name: display.presetName, processing_option_ids: selection.optionIds, processing_option_names: display.optionNames, processing_note: selection.note.trim() };
+      const valid = validProcessingSelection(selection, activeProductProcessingPresetConfigs(source.product_id, productProcessingPresets, processingPresets), activeProductProcessingOptionConfigs(source.product_id, productProcessingOptions, processingOptions));
+      const display = processingDisplay(source.product_id, valid);
+      const nextKey = processingSignature(source.variant_id, valid);
+      const updated = { ...source, cart_key: nextKey, processing_preset_id: valid.presetId, processing_preset_name: display.presetName, processing_option_ids: valid.optionIds, processing_option_names: display.optionNames, processing_note: valid.note };
       const duplicate = items.find((item) => item.cart_key === nextKey && item.cart_key !== cartKey);
       if (duplicate) return items.filter((item) => item.cart_key !== cartKey && item.cart_key !== nextKey).concat({ ...duplicate, quantity: duplicate.quantity + source.quantity });
       return items.map((item) => item.cart_key === cartKey ? updated : item);
@@ -421,7 +431,7 @@ export default function HomePage() {
   }
 
   function presetOptionIds(presetId: string, productId: string) {
-    const allowed = new Set(productProcessingOptions.filter((item) => item.product_id === productId).map((item) => item.processing_option_id));
+    const allowed = new Set(activeProductProcessingOptionConfigs(productId, productProcessingOptions, processingOptions).map((item) => item.processing_option_id));
     return processingPresetOptions.filter((item) => item.preset_id === presetId && allowed.has(item.processing_option_id)).map((item) => item.processing_option_id).sort();
   }
 
@@ -684,8 +694,8 @@ export default function HomePage() {
             const soldOut = purchasableVariants.length === 0;
             const cartLimitReached = Boolean(selectedVariant && remainingPurchasable <= 0);
             const cartActionStatus = cartActionStatuses[product.id] || "idle";
-            const availableProcessingOptions = productProcessingOptions.filter((item) => item.product_id === product.id).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
-            const availableProcessingPresets = productProcessingPresets.filter((item) => item.product_id === product.id).map((config) => ({ config, preset: processingPresets.find((preset) => preset.id === config.preset_id) })).filter((item): item is { config: ProductProcessingPreset; preset: ProcessingPreset } => Boolean(item.preset));
+            const availableProcessingOptions = activeProductProcessingOptionConfigs(product.id, productProcessingOptions, processingOptions).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
+            const availableProcessingPresets = activeProductProcessingPresetConfigs(product.id, productProcessingPresets, processingPresets).map((config) => ({ config, preset: processingPresets.find((preset) => preset.id === config.preset_id) })).filter((item): item is { config: ProductProcessingPreset; preset: ProcessingPreset } => Boolean(item.preset));
             const processingSelection = productProcessing[product.id] || { presetId: null, optionIds: [], note: "" };
             const processingSelectionDisplay = summarizedSelection(product.id, processingSelection);
             const addButtonText = soldOut
@@ -760,8 +770,8 @@ export default function HomePage() {
               const purchaseLimit = variant ? getPurchaseLimit(variant) : item.quantity;
               const totalVariantQuantity = getCartQuantityForVariant(cart, item.variant_id);
               const cartBusy = cartActionStatuses[item.product_id] === "adding";
-              const cartPresets = productProcessingPresets.filter((config) => config.product_id === item.product_id).map((config) => processingPresets.find((preset) => preset.id === config.preset_id)).filter((preset): preset is ProcessingPreset => Boolean(preset));
-              const cartOptions = productProcessingOptions.filter((config) => config.product_id === item.product_id).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
+              const cartPresets = activeProductProcessingPresetConfigs(item.product_id, productProcessingPresets, processingPresets).map((config) => processingPresets.find((preset) => preset.id === config.preset_id)).filter((preset): preset is ProcessingPreset => Boolean(preset));
+              const cartOptions = activeProductProcessingOptionConfigs(item.product_id, productProcessingOptions, processingOptions).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
               const processingSummary = summarizedProcessing(item);
               return <article className="drawerCartItem" key={item.cart_key}>
                 <div className="drawerItemImage">{product?.image_url ? <img src={product.image_url} alt={item.product_name} /> : <span>🐟</span>}</div>
