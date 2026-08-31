@@ -20,6 +20,15 @@ function storagePath(url: string | null) {
   return index < 0 || !url ? null : decodeURIComponent(url.slice(index + marker.length));
 }
 
+function productSaveErrorMessage(message: string) {
+  if (message.includes("product_category_required")) return "請選擇商品類別。";
+  if (message.includes("product_category_not_found")) return "商品類別不存在，請重新選擇。";
+  if (message.includes("product_category_inactive")) return "此商品類別已停用，請選擇啟用中的類別。";
+  if (message.includes("product_not_found")) return "找不到此商品，請重新整理後再試。";
+  if (message.includes("admin_required")) return "沒有管理員權限。";
+  return `商品儲存失敗：${message}`;
+}
+
 async function compressToWebP(file: File) {
   const objectUrl = URL.createObjectURL(file);
   try {
@@ -61,6 +70,8 @@ export default function AdminPage() {
   const [busy, setBusy] = useState(false);
   const [pendingMatchCount, setPendingMatchCount] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const selectedFormCategory = productCategories.find((category) => category.id === form.category_id) || null;
+  const activeProductCategories = productCategories.filter((category) => category.active);
 
   const loadAll = useCallback(async () => {
     const [productResult, orderResult, orderItemResult, variantResult, requestResult, catalogResult, categoryResult] = await Promise.all([
@@ -134,18 +145,22 @@ export default function AdminPage() {
       let imageUrl = existingImageUrl;
       const oldPath = file ? storagePath(existingImageUrl) : null;
       if (file) imageUrl = await uploadImage(file);
-      const payload = { ...form, name: form.name.trim(), description: form.description.trim() || null, cooking: form.cooking.trim() || null, image_url: imageUrl };
-      const result = editingId ? await supabase.from("products").update(payload).eq("id", editingId) : await supabase.from("products").insert(payload);
-      if (result.error) throw new Error(`商品儲存失敗：${result.error.message}`);
+      const payload = { p_name: form.name.trim(), p_description: form.description.trim() || null, p_cooking: form.cooking.trim() || null, p_image_url: imageUrl, p_status: form.status, p_featured: form.featured, p_sort_order: form.sort_order, p_category_id: form.category_id };
+      const result = editingId
+        ? await supabase.rpc("admin_update_catalog_product", { p_product_id: editingId, ...payload })
+        : await supabase.rpc("admin_create_catalog_product", payload);
+      if (result.error) throw new Error(result.error.message);
       if (oldPath) await supabase.storage.from("product-images").remove([oldPath]);
       setNotice(editingId ? "商品已更新。" : "商品已新增。"); resetForm(); await loadAll();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "商品儲存失敗。"); }
+    } catch (error) { setNotice(productSaveErrorMessage(error instanceof Error ? error.message : "")); }
     finally { setBusy(false); }
   }
 
   function editProduct(product: Product) {
-    resetForm(); setEditingId(product.id); setExistingImageUrl(product.image_url); setPreviewUrl(product.image_url);
+    resetForm(); setNotice(""); setEditingId(product.id); setExistingImageUrl(product.image_url); setPreviewUrl(product.image_url);
     setForm({ name: product.name, description: product.description || "", cooking: product.cooking || "", category_id: product.category_id || "", status: product.status, featured: product.featured, sort_order: product.sort_order });
+    const category = productCategories.find((candidate) => candidate.id === product.category_id);
+    if (category && !category.active) setNotice(`目前商品類別「${category.name}」已停用；請改選啟用中的商品類別後再儲存。`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -169,7 +184,7 @@ export default function AdminPage() {
         <form className="panel" onSubmit={save}>
           <h2>{editingId ? "編輯商品" : "新增商品"}</h2>
           <label>商品名稱<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-          <label>商品類別 *<select required value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}><option value="">請選擇商品類別</option>{productCategories.filter((category) => category.active).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+          <label>商品類別 *<select required value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}><option value="">請選擇商品類別</option>{selectedFormCategory && !selectedFormCategory.active && <option value={selectedFormCategory.id} disabled>{selectedFormCategory.name}（已停用，請重新選擇）</option>}{activeProductCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><small className="categoryAssignmentHelp">僅可指派啟用中的類別；選單依前台排序顯示。</small></label>
           <label>商品描述<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
           <label>料理建議<input value={form.cooking} onChange={(e) => setForm({ ...form, cooking: e.target.value })} /></label>
           <div className={`uploadDropzone ${dragging ? "isDragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); selectFile(e.dataTransfer.files?.[0] || null); }} onClick={() => fileInputRef.current?.click()} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click(); }}>
