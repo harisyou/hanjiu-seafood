@@ -20,6 +20,15 @@ function storagePath(url: string | null) {
   return index < 0 || !url ? null : decodeURIComponent(url.slice(index + marker.length));
 }
 
+function productSaveErrorMessage(message: string) {
+  if (message.includes("product_category_required")) return "請選擇商品類別。";
+  if (message.includes("product_category_not_found")) return "商品類別不存在，請重新選擇。";
+  if (message.includes("product_category_inactive")) return "此商品類別已停用，請選擇啟用中的類別。";
+  if (message.includes("product_not_found")) return "找不到此商品，請重新整理後再試。";
+  if (message.includes("admin_required")) return "沒有管理員權限。";
+  return `商品儲存失敗：${message}`;
+}
+
 async function compressToWebP(file: File) {
   const objectUrl = URL.createObjectURL(file);
   try {
@@ -136,12 +145,14 @@ export default function AdminPage() {
       let imageUrl = existingImageUrl;
       const oldPath = file ? storagePath(existingImageUrl) : null;
       if (file) imageUrl = await uploadImage(file);
-      const payload = { ...form, name: form.name.trim(), description: form.description.trim() || null, cooking: form.cooking.trim() || null, image_url: imageUrl };
-      const result = editingId ? await supabase.from("products").update(payload).eq("id", editingId) : await supabase.from("products").insert(payload);
-      if (result.error) throw new Error(`商品儲存失敗：${result.error.message}`);
+      const payload = { p_name: form.name.trim(), p_description: form.description.trim() || null, p_cooking: form.cooking.trim() || null, p_image_url: imageUrl, p_status: form.status, p_featured: form.featured, p_sort_order: form.sort_order, p_category_id: form.category_id };
+      const result = editingId
+        ? await supabase.rpc("admin_update_catalog_product", { p_product_id: editingId, ...payload })
+        : await supabase.rpc("admin_create_catalog_product", payload);
+      if (result.error) throw new Error(result.error.message);
       if (oldPath) await supabase.storage.from("product-images").remove([oldPath]);
       setNotice(editingId ? "商品已更新。" : "商品已新增。"); resetForm(); await loadAll();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "商品儲存失敗。"); }
+    } catch (error) { setNotice(productSaveErrorMessage(error instanceof Error ? error.message : "")); }
     finally { setBusy(false); }
   }
 
