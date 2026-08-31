@@ -24,6 +24,14 @@ test("one-time backfill keeps cephalopods out of the live-fish name rule so they
   assert.match(migration, /else category_ids\.other_id/i);
 });
 
+test("cephalopod backfill takes precedence over fish_catalog_id so catalog classification cannot force 現流魚", () => {
+  const cephalopodRule = migration.indexOf("when btrim(coalesce(product.name, '')) ~* '透抽|小卷|花枝|魷' then category_ids.other_id");
+  const catalogLiveFishRule = migration.indexOf("when product.fish_catalog_id is not null");
+  assert.ok(cephalopodRule >= 0, "cephalopod rule must exist");
+  assert.ok(catalogLiveFishRule >= 0, "fish_catalog_id live-fish rule must exist");
+  assert.ok(cephalopodRule < catalogLiveFishRule, "cephalopods must be classified before fish_catalog_id is considered");
+});
+
 test("migration protects category integrity and delegates all writes to verified admin RPCs", () => {
   assert.match(migration, /product_categories_normalized_name_key/i);
   assert.match(migration, /enable row level security/i);

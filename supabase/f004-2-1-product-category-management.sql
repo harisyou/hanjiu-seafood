@@ -66,6 +66,8 @@ with category_ids as (
 )
 update public.products product
 set category_id = case
+  -- Fish catalog can also contain cephalopods; keep them in 其他 until a formal category exists.
+  when btrim(coalesce(product.name, '')) ~* '透抽|小卷|花枝|魷' then category_ids.other_id
   when btrim(coalesce(product.name, '')) ~* '冷凍|冷藏|急凍|凍品|冰鮮' then category_ids.frozen_id
   when btrim(coalesce(product.name, '')) ~* '蝦|蟹|龍蝦|螯' then category_ids.shrimp_crab_id
   when btrim(coalesce(product.name, '')) ~* '貝|蛤|蠔|牡蠣|蚵|蜆|鮑' then category_ids.shellfish_id
