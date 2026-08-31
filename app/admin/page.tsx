@@ -61,6 +61,8 @@ export default function AdminPage() {
   const [busy, setBusy] = useState(false);
   const [pendingMatchCount, setPendingMatchCount] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const selectedFormCategory = productCategories.find((category) => category.id === form.category_id) || null;
+  const activeProductCategories = productCategories.filter((category) => category.active);
 
   const loadAll = useCallback(async () => {
     const [productResult, orderResult, orderItemResult, variantResult, requestResult, catalogResult, categoryResult] = await Promise.all([
@@ -144,8 +146,10 @@ export default function AdminPage() {
   }
 
   function editProduct(product: Product) {
-    resetForm(); setEditingId(product.id); setExistingImageUrl(product.image_url); setPreviewUrl(product.image_url);
+    resetForm(); setNotice(""); setEditingId(product.id); setExistingImageUrl(product.image_url); setPreviewUrl(product.image_url);
     setForm({ name: product.name, description: product.description || "", cooking: product.cooking || "", category_id: product.category_id || "", status: product.status, featured: product.featured, sort_order: product.sort_order });
+    const category = productCategories.find((candidate) => candidate.id === product.category_id);
+    if (category && !category.active) setNotice(`目前商品類別「${category.name}」已停用；請改選啟用中的商品類別後再儲存。`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -169,7 +173,7 @@ export default function AdminPage() {
         <form className="panel" onSubmit={save}>
           <h2>{editingId ? "編輯商品" : "新增商品"}</h2>
           <label>商品名稱<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-          <label>商品類別 *<select required value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}><option value="">請選擇商品類別</option>{productCategories.filter((category) => category.active).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+          <label>商品類別 *<select required value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}><option value="">請選擇商品類別</option>{selectedFormCategory && !selectedFormCategory.active && <option value={selectedFormCategory.id} disabled>{selectedFormCategory.name}（已停用，請重新選擇）</option>}{activeProductCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><small className="categoryAssignmentHelp">僅可指派啟用中的類別；選單依前台排序顯示。</small></label>
           <label>商品描述<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
           <label>料理建議<input value={form.cooking} onChange={(e) => setForm({ ...form, cooking: e.target.value })} /></label>
           <div className={`uploadDropzone ${dragging ? "isDragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); selectFile(e.dataTransfer.files?.[0] || null); }} onClick={() => fileInputRef.current?.click()} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click(); }}>
