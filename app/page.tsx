@@ -37,6 +37,7 @@ type CheckoutForm = {
   address: string;
   pickupDate: string;
   pickupTime: string;
+  deliveryTimeSlot: "不指定" | "上午" | "下午";
   preferredStoreName: string;
   preferredStoreCode: string;
   note: string;
@@ -54,6 +55,16 @@ const deliveryMethods: Array<{ value: DeliveryMethod; icon: string; detail: stri
 
 function displayDeliveryMethod(method: DeliveryMethod) {
   return method === "7-ELEVEN 冷凍交貨便" ? "7-11 冷凍交貨便" : method;
+}
+
+const deliveryTimeSlots = ["不指定", "上午", "下午"] as const;
+
+function isDeliveryTimeSlot(value: unknown): value is CheckoutForm["deliveryTimeSlot"] {
+  return typeof value === "string" && deliveryTimeSlots.includes(value as CheckoutForm["deliveryTimeSlot"]);
+}
+
+function usesDeliveryTimeSlot(method: DeliveryMethod) {
+  return method === "冷凍宅配" || method === "7-ELEVEN 冷凍交貨便";
 }
 
 function getPurchaseLimit(variant: ProductVariant) {
@@ -100,7 +111,7 @@ export default function HomePage() {
   const [cartBounceKey, setCartBounceKey] = useState(0);
   const [animatedCartQuantity, setAnimatedCartQuantity] = useState("");
   const [notice, setNotice] = useState("");
-  const [form, setForm] = useState<CheckoutForm>({ customer_name: "", phone: "", email: "", fulfillment: "永春市場自取", address: "", pickupDate: "", pickupTime: "", preferredStoreName: "", preferredStoreCode: "", note: "", rememberCustomerData: true });
+  const [form, setForm] = useState<CheckoutForm>({ customer_name: "", phone: "", email: "", fulfillment: "永春市場自取", address: "", pickupDate: "", pickupTime: "", deliveryTimeSlot: "不指定", preferredStoreName: "", preferredStoreCode: "", note: "", rememberCustomerData: true });
   const [savedProfile, setSavedProfile] = useState<CheckoutForm | null>(null);
   const [editingCheckout, setEditingCheckout] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -120,7 +131,7 @@ export default function HomePage() {
       if (!saved) return;
       const profile = JSON.parse(saved) as CheckoutForm;
       if (profile.customer_name || profile.phone) {
-        setSavedProfile({ ...profile, email: profile.email || "", rememberCustomerData: true });
+        setSavedProfile({ ...profile, email: profile.email || "", deliveryTimeSlot: isDeliveryTimeSlot(profile.deliveryTimeSlot) ? profile.deliveryTimeSlot : "不指定", rememberCustomerData: true });
         setEditingCheckout(false);
       }
     } catch {
@@ -483,7 +494,7 @@ export default function HomePage() {
 
   function useSavedCheckoutProfile() {
     if (!savedProfile) return;
-    setForm({ ...savedProfile, rememberCustomerData: true });
+    setForm({ ...savedProfile, deliveryTimeSlot: isDeliveryTimeSlot(savedProfile.deliveryTimeSlot) ? savedProfile.deliveryTimeSlot : "不指定", rememberCustomerData: true });
     setEditingCheckout(true);
     setNotice("已帶入常用資料，請確認後送出訂單。");
   }
@@ -503,10 +514,12 @@ export default function HomePage() {
     if (form.email.trim() && !isValidEmail(form.email)) return "Email 格式錯誤，請確認後再試。";
     if (form.fulfillment === "永春市場自取" && !form.pickupDate) return "請選擇取貨日期";
     if (form.fulfillment === "永春市場自取" && !form.pickupTime) return "請選擇取貨時間";
-    if ((form.fulfillment === "台北市配送" || form.fulfillment === "冷凍宅配") && !form.pickupDate) return "請選擇希望配送日期";
-    if (form.fulfillment === "7-ELEVEN 冷凍交貨便" && !form.pickupDate) return "請選擇希望配送日期";
-    const dateTimeError = validateTaipeiDateTime(form.pickupDate, form.pickupTime);
-    if (dateTimeError) return dateTimeError;
+    if (form.fulfillment === "台北市配送" && !form.pickupDate) return "請選擇希望配送日期";
+    if ((form.fulfillment === "冷凍宅配" || form.fulfillment === "7-ELEVEN 冷凍交貨便") && !form.pickupDate) return "請選擇希望到貨日期";
+    if ((form.fulfillment === "永春市場自取" || form.fulfillment === "台北市配送") && form.pickupDate) {
+      const dateTimeError = validateTaipeiDateTime(form.pickupDate, form.pickupTime);
+      if (dateTimeError) return dateTimeError;
+    }
     if ((form.fulfillment === "台北市配送" || form.fulfillment === "冷凍宅配") && !form.address.trim()) return "請填寫配送地址";
     if (form.fulfillment === "7-ELEVEN 冷凍交貨便" && !form.preferredStoreName.trim()) return "請填寫 7-11 門市名稱";
     if (form.fulfillment === "台北市配送" && total < 2500) return `再買 ${formatPrice(shippingRemaining)} 即可享台北市配送`;
@@ -556,11 +569,12 @@ export default function HomePage() {
     }
 
     const deliveryDetails = [
-      form.address.trim() && `地址：${form.address.trim()}`,
-      form.pickupDate && `日期：${form.pickupDate}`,
-      form.pickupTime && `時間：${form.pickupTime}`,
-      form.preferredStoreName.trim() && `門市：${form.preferredStoreName.trim()}`,
-      form.preferredStoreCode.trim() && `店號：${form.preferredStoreCode.trim()}`,
+      (form.fulfillment === "台北市配送" || form.fulfillment === "冷凍宅配") && form.address.trim() && `地址：${form.address.trim()}`,
+      form.pickupDate && `${form.fulfillment === "永春市場自取" ? "取貨日期" : form.fulfillment === "台北市配送" ? "希望配送日期" : "希望到貨日期"}：${form.pickupDate}`,
+      (form.fulfillment === "永春市場自取" || form.fulfillment === "台北市配送") && form.pickupTime && `${form.fulfillment === "永春市場自取" ? "取貨時間" : "希望時間"}：${form.pickupTime}`,
+      usesDeliveryTimeSlot(form.fulfillment) && `希望到貨時段：${form.deliveryTimeSlot}`,
+      form.fulfillment === "7-ELEVEN 冷凍交貨便" && form.preferredStoreName.trim() && `門市：${form.preferredStoreName.trim()}`,
+      form.fulfillment === "7-ELEVEN 冷凍交貨便" && form.preferredStoreCode.trim() && `店號：${form.preferredStoreCode.trim()}`,
       form.note.trim() && `備註：${form.note.trim()}`
     ].filter(Boolean).join("\n");
     const checkoutItems = cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity, processing_preset_id: item.processing_preset_id, processing_option_ids: item.processing_option_ids, processing_note: item.processing_note }));
@@ -804,7 +818,7 @@ export default function HomePage() {
               const unavailable = method.value === "台北市配送" && total < shippingThreshold;
               const selected = form.fulfillment === method.value;
               return <label className={`deliveryOption ${selected ? "isSelected" : ""} ${unavailable ? "isDisabled" : ""}`} key={method.value}>
-                <input type="radio" name="delivery" value={method.value} aria-label={displayDeliveryMethod(method.value)} checked={selected} disabled={unavailable} onChange={() => setForm((current) => ({ ...current, fulfillment: method.value }))} />
+                <input type="radio" name="delivery" value={method.value} aria-label={displayDeliveryMethod(method.value)} checked={selected} disabled={unavailable} onChange={() => setForm((current) => ({ ...current, fulfillment: method.value, deliveryTimeSlot: usesDeliveryTimeSlot(method.value) && !isDeliveryTimeSlot(current.deliveryTimeSlot) ? "不指定" : current.deliveryTimeSlot }))} />
                 <span className="deliveryIcon" aria-hidden="true">{method.icon}</span><span className="deliveryCopy"><span className="deliveryTitle"><strong>{displayDeliveryMethod(method.value)}</strong><small className="recommendationLabel">{method.recommendation}</small></span><small className="deliverySubtitle">{method.value === "台北市配送" ? unavailable ? <>🚚 再買 <b>{formatPrice(shippingRemaining)}</b> 即可享台北市配送</> : "已符合台北市配送資格" : method.detail}</small></span><span className="deliveryCheck" aria-hidden="true">{selected ? "✓" : ""}</span>
               </label>;
             })}</div>
@@ -813,10 +827,12 @@ export default function HomePage() {
             </fieldset>
             <div className="checkoutFields"><label>姓名 *<input autoComplete="name" value={form.customer_name} onChange={(event) => setForm({ ...form, customer_name: event.target.value })} /></label><label>電話 *<input type="tel" inputMode="tel" autoComplete="tel" placeholder="例如：0912-345-678" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /><small>例如：0912-345-678</small></label><label className="fullField">Email<input type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
               {form.fulfillment === "永春市場自取" && <><label>取貨日期 *<input type="date" min={taipeiToday()} value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>取貨時間 *<input type="time" min={form.pickupDate === taipeiToday() ? taipeiCurrentTime() : undefined} value={form.pickupTime} onChange={(event) => setForm({ ...form, pickupTime: event.target.value })} /></label></>}
-              {(form.fulfillment === "台北市配送" || form.fulfillment === "冷凍宅配") && <><label className="fullField">{form.fulfillment === "台北市配送" ? "配送地址 *" : "收件地址 *"}<input autoComplete="street-address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label><label>希望配送日期 *<input type="date" required min={taipeiToday()} value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>希望時間<input type="time" min={form.pickupDate === taipeiToday() ? taipeiCurrentTime() : undefined} value={form.pickupTime} onChange={(event) => setForm({ ...form, pickupTime: event.target.value })} /></label></>}
-              {form.fulfillment === "7-ELEVEN 冷凍交貨便" && <><label>希望配送日期 *<input type="date" required min={taipeiToday()} value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>希望時間<input type="time" min={form.pickupDate === taipeiToday() ? taipeiCurrentTime() : undefined} value={form.pickupTime} onChange={(event) => setForm({ ...form, pickupTime: event.target.value })} /></label><label>7-11 門市名稱 *<input placeholder="例如：西湖門市" value={form.preferredStoreName} onChange={(event) => setForm({ ...form, preferredStoreName: event.target.value })} /></label><label>7-11 門市店號<input inputMode="numeric" placeholder="例如：123456" value={form.preferredStoreCode} onChange={(event) => setForm({ ...form, preferredStoreCode: event.target.value })} /></label></>}
+              {form.fulfillment === "台北市配送" && <><label className="fullField">配送地址 *<input autoComplete="street-address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label><label>希望配送日期 *<input type="date" required min={taipeiToday()} value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>希望時間<input type="time" min={form.pickupDate === taipeiToday() ? taipeiCurrentTime() : undefined} value={form.pickupTime} onChange={(event) => setForm({ ...form, pickupTime: event.target.value })} /></label></>}
+              {form.fulfillment === "冷凍宅配" && <><label className="fullField">收件地址 *<input autoComplete="street-address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label><label>希望到貨日期 *<input type="date" required min={taipeiToday()} value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>希望到貨時段<select value={form.deliveryTimeSlot} onChange={(event) => setForm({ ...form, deliveryTimeSlot: event.target.value as CheckoutForm["deliveryTimeSlot"] })}>{deliveryTimeSlots.map((slot) => <option key={slot} value={slot}>{slot}</option>)}</select><small>實際到貨時間依物流配送狀況為準。</small></label></>}
+              {form.fulfillment === "7-ELEVEN 冷凍交貨便" && <><label>希望到貨日期 *<input type="date" required min={taipeiToday()} value={form.pickupDate} onChange={(event) => setForm({ ...form, pickupDate: event.target.value })} /></label><label>希望到貨時段<select value={form.deliveryTimeSlot} onChange={(event) => setForm({ ...form, deliveryTimeSlot: event.target.value as CheckoutForm["deliveryTimeSlot"] })}>{deliveryTimeSlots.map((slot) => <option key={slot} value={slot}>{slot}</option>)}</select><small>實際到貨時間依物流配送狀況為準。</small></label><label>7-11 門市名稱 *<input placeholder="例如：西湖門市" value={form.preferredStoreName} onChange={(event) => setForm({ ...form, preferredStoreName: event.target.value })} /></label><label>7-11 門市店號<input inputMode="numeric" placeholder="例如：123456" value={form.preferredStoreCode} onChange={(event) => setForm({ ...form, preferredStoreCode: event.target.value })} /></label></>}
               <label className="fullField">備註<textarea rows={3} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} /></label></div>
             <label className="rememberCustomer"><input type="checkbox" checked={form.rememberCustomerData} onChange={(event) => updateRememberPreference(event.target.checked)} /><span><strong>記住我的資料，下次自動帶入</strong><small>資料只會儲存在這台裝置，不會建立會員帳號。</small></span></label>
+            <section className="checkoutAmountSummary" aria-label="結帳金額摘要"><div><span>商品小計</span><strong>{formatPrice(total)}</strong></div><div><span>配送／運費</span><strong>{formatPrice(0)}</strong></div><div className="checkoutPayableTotal"><span>應付總額</span><strong>{formatPrice(total)}</strong></div></section>
             <button className="submitOrderButton" type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>{isSubmitting ? "送出中…" : "送出訂單"}</button><div className="checkoutNotice" aria-live="polite">{notice && <p className="notice">{notice}</p>}</div>
           </form>}
         </div>
