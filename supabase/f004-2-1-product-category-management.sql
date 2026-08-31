@@ -69,7 +69,7 @@ set category_id = case
   when btrim(coalesce(product.name, '')) ~* '冷凍|冷藏|急凍|凍品|冰鮮' then category_ids.frozen_id
   when btrim(coalesce(product.name, '')) ~* '蝦|蟹|龍蝦|螯' then category_ids.shrimp_crab_id
   when btrim(coalesce(product.name, '')) ~* '貝|蛤|蠔|牡蠣|蚵|蜆|鮑' then category_ids.shellfish_id
-  when product.fish_catalog_id is not null or btrim(coalesce(product.name, '')) ~* '魚|鯛|鱸|鯖|鯧|鰹|鮭|石斑|白帶|午仔|馬頭|透抽|小卷|花枝|魷' then category_ids.live_fish_id
+  when product.fish_catalog_id is not null or btrim(coalesce(product.name, '')) ~* '魚|鯛|鱸|鯖|鯧|鰹|鮭|石斑|白帶|午仔|馬頭' then category_ids.live_fish_id
   else category_ids.other_id
 end
 from category_ids

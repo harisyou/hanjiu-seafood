@@ -16,6 +16,14 @@ test("migration creates relational categories, seeds initial categories, and bac
   assert.match(migration, /alter table public\.products alter column category_id set not null/i);
 });
 
+test("one-time backfill keeps cephalopods out of the live-fish name rule so they fall back to 其他", () => {
+  const liveFishRule = migration.match(/when product\.fish_catalog_id is not null or btrim\(coalesce\(product\.name, ''\)\) ~\* '([^']+)' then category_ids\.live_fish_id/i);
+  assert.ok(liveFishRule, "live-fish backfill rule must exist");
+  assert.match(liveFishRule[1], /魚|鯛|馬頭/);
+  for (const cephalopod of ["透抽", "小卷", "花枝", "魷"]) assert.doesNotMatch(liveFishRule[1], new RegExp(cephalopod));
+  assert.match(migration, /else category_ids\.other_id/i);
+});
+
 test("migration protects category integrity and delegates all writes to verified admin RPCs", () => {
   assert.match(migration, /product_categories_normalized_name_key/i);
   assert.match(migration, /enable row level security/i);
