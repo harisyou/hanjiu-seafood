@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { formatPrice, ProcessingOption, ProcessingPreset, ProcessingPresetOption, Product, ProductProcessingOption, ProductProcessingPreset, ProductVariant } from "@/lib/catalog";
-import { filterProducts, normalizeProductSearch, PRODUCT_CATEGORIES, ProductCategory } from "@/lib/product-filters";
+import { formatPrice, ProcessingOption, ProcessingPreset, ProcessingPresetOption, Product, ProductCategoryRecord, ProductProcessingOption, ProductProcessingPreset, ProductVariant } from "@/lib/catalog";
+import { filterProducts, normalizeProductSearch, sortActiveProductCategories } from "@/lib/product-filters";
 import { isValidEmail, isValidTaiwanMobile, normalizeTaiwanMobile, taipeiCurrentTime, taipeiToday, validateTaipeiDateTime } from "@/lib/customer-validation";
 import { checkoutRequestFingerprint, checkoutRetryKey, clearCheckoutRetryKey } from "@/lib/checkout-idempotency";
 import { activeProductProcessingOptionConfigs, activeProductProcessingPresetConfigs, validProcessingSelection } from "@/lib/processing-availability";
@@ -89,8 +89,9 @@ export default function HomePage() {
   const supabase = useMemo(() => createClient(), []);
   const [products, setProducts] = useState<Product[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
+  const [productCategories, setProductCategories] = useState<ProductCategoryRecord[]>([]);
   const [productSearch, setProductSearch] = useState("");
-  const [selectedProductCategory, setSelectedProductCategory] = useState<ProductCategory>("all");
+  const [selectedProductCategory, setSelectedProductCategory] = useState("all");
   const [inStockOnly, setInStockOnly] = useState(false);
   const [processingOptions, setProcessingOptions] = useState<ProcessingOption[]>([]);
   const [processingPresets, setProcessingPresets] = useState<ProcessingPreset[]>([]);
@@ -155,9 +156,10 @@ export default function HomePage() {
 
   useEffect(() => {
     async function loadCatalog() {
-      const [productResult, variantResult, optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult] = await Promise.all([
+      const [productResult, variantResult, categoryResult, optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult] = await Promise.all([
         supabase.from("products").select("*").neq("status", "hidden").order("sort_order"),
         supabase.from("product_variants").select("*").eq("active", true).order("sort_order"),
+        supabase.from("product_categories").select("id,name,sort_order,active").eq("active", true).order("sort_order").order("name"),
         supabase.from("processing_options").select("*").eq("active", true).order("sort_order"),
         supabase.from("processing_presets").select("*").eq("active", true).order("sort_order"),
         supabase.from("processing_preset_options").select("*"),
@@ -168,6 +170,8 @@ export default function HomePage() {
       else setProducts((productResult.data || []) as Product[]);
       if (variantResult.error) setNotice(`規格載入失敗：${variantResult.error.message}`);
       else setVariants((variantResult.data || []) as ProductVariant[]);
+      if (categoryResult.error) setNotice("商品類別暫時無法載入，請稍後再試。");
+      else setProductCategories((categoryResult.data || []) as ProductCategoryRecord[]);
       const processingError = [optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult].find((result) => result.error)?.error;
       if (processingError) setNotice("魚貨處理方式載入失敗，請重新整理頁面。");
       else {
@@ -181,6 +185,10 @@ export default function HomePage() {
     }
     loadCatalog();
   }, [supabase]);
+
+  useEffect(() => {
+    if (selectedProductCategory !== "all" && !productCategories.some((category) => category.id === selectedProductCategory && category.active)) setSelectedProductCategory("all");
+  }, [productCategories, selectedProductCategory]);
 
   useEffect(() => {
     if (!catalogReady || cartRestored) return;
@@ -637,6 +645,10 @@ export default function HomePage() {
     () => filterProducts(products, variants, { query: productSearch, category: selectedProductCategory, inStockOnly }),
     [inStockOnly, productSearch, products, selectedProductCategory, variants]
   );
+  const storefrontCategories = useMemo(
+    () => [{ id: "all", name: "全部" }, ...sortActiveProductCategories(productCategories)],
+    [productCategories]
+  );
   const filtersActive = Boolean(normalizeProductSearch(productSearch) || selectedProductCategory !== "all" || inStockOnly);
   const shippingThreshold = 2500;
   const shippingRemaining = Math.max(0, shippingThreshold - total);
@@ -689,7 +701,7 @@ export default function HomePage() {
             <input type="search" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="搜尋商品名稱，例如：馬頭" aria-label="商品搜尋" aria-controls="product-grid" />
           </label>
           <div className="productCategoryChips" role="group" aria-label="商品分類">
-            {PRODUCT_CATEGORIES.map((category) => <button type="button" key={category.id} className={selectedProductCategory === category.id ? "isActive" : ""} aria-pressed={selectedProductCategory === category.id} onClick={() => setSelectedProductCategory(category.id)}>{category.label}</button>)}
+            {storefrontCategories.map((category) => <button type="button" key={category.id} className={selectedProductCategory === category.id ? "isActive" : ""} aria-pressed={selectedProductCategory === category.id} onClick={() => setSelectedProductCategory(category.id)}>{category.name}</button>)}
           </div>
           <label className="stockOnlyToggle">
             <input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} />

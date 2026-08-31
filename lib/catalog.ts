@@ -11,6 +11,16 @@ export type Product = {
   sort_order: number;
   processing_enabled?: boolean;
   fish_catalog_id?: string | null;
+  category_id?: string | null;
+};
+
+export type ProductCategoryRecord = {
+  id: string;
+  name: string;
+  sort_order: number;
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type ProductVariant = {
