@@ -20,3 +20,10 @@ Provision the test database with a disposable product/variant and set the three
 `F004_1_TEST_*` fixture values described in the test file. The harness invokes two
 concurrent RPC calls in separate `psql` sessions and then queries order, item,
 inventory, and movement counts.
+
+For the optional F004-3.3 case, also set `F004_3_3_ALLOW_DATABASE_TESTS=1`,
+`F004_3_3_TEST_PREORDER_VARIANT_ID`, and optionally
+`F004_3_3_TEST_PREORDER_QUANTITY`. The fixture must be active, preorder-enabled,
+and the test quantity must be greater than its current inventory (zero inventory
+is valid). The harness sends no `supply_type` and verifies PostgreSQL stores one
+preorder item without changing inventory or creating a movement.

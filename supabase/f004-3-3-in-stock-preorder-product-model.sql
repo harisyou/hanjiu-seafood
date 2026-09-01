@@ -15,7 +15,7 @@ alter table public.order_items
   check (supply_type in ('in_stock', 'preorder'));
 
 comment on column public.product_variants.preorder_enabled is
-  'When inventory is zero, an active variant with this flag may be purchased as preorder. It never represents stock.';
+  'An active variant with this flag may be purchased as preorder when the requested quantity exceeds its current inventory. Inventory remains available-on-hand information and is not a preorder limit.';
 comment on column public.order_items.supply_type is
   'Immutable checkout snapshot: in_stock decremented inventory; preorder did not reserve or decrement inventory.';
 
@@ -87,26 +87,24 @@ begin
   if p_fulfillment not in ('永春市場自取', '台北市配送', '冷凍宅配', '7-ELEVEN 冷凍交貨便') then raise exception 'invalid_fulfillment'; end if;
   if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'items_required'; end if;
 
-  -- Canonicalization includes the immutable supply intent. Omitted supply_type is
-  -- only the legacy in_stock interpretation for the five/six-argument wrappers.
+  -- Canonicalization represents only the customer's request. The database derives
+  -- supply_type later from the locked current variant; a client cannot fingerprint
+  -- or forge an inventory-bypassing supply decision.
   for v_item in select value from jsonb_array_elements(p_items) order by (value->>'variant_id')::uuid loop
     if jsonb_typeof(v_item) <> 'object' then raise exception 'invalid_checkout_item'; end if;
     if jsonb_typeof(coalesce(v_item->'processing_option_ids', '[]'::jsonb)) <> 'array' then raise exception 'invalid_processing_options'; end if;
     v_variant_id := (v_item->>'variant_id')::uuid;
     v_quantity := (v_item->>'quantity')::integer;
-    v_supply_type := coalesce(nullif(btrim(coalesce(v_item->>'supply_type', '')), ''), 'in_stock');
     v_preset_id := nullif(btrim(coalesce(v_item->>'processing_preset_id', '')), '');
     v_processing_note := nullif(left(btrim(coalesce(v_item->>'processing_note', '')), 500), '');
     select coalesce(array_agg(distinct value order by value), '{}') into v_option_ids
     from jsonb_array_elements_text(coalesce(v_item->'processing_option_ids', '[]'::jsonb));
     if v_quantity is null or v_quantity < 1 then raise exception 'invalid_quantity'; end if;
-    if v_supply_type not in ('in_stock', 'preorder') then raise exception 'invalid_supply_type'; end if;
     if v_variant_id = any(v_seen_variant_ids) then raise exception 'duplicate_variant_item'; end if;
     v_seen_variant_ids := array_append(v_seen_variant_ids, v_variant_id);
     v_canonical_items := v_canonical_items || jsonb_build_array(jsonb_build_object(
       'variant_id', v_variant_id::text,
       'quantity', v_quantity,
-      'supply_type', v_supply_type,
       'processing_preset_id', v_preset_id,
       'processing_option_ids', to_jsonb(v_option_ids),
       'processing_note', v_processing_note
@@ -148,7 +146,6 @@ begin
   for v_item in select value from jsonb_array_elements(p_items) order by (value->>'variant_id')::uuid loop
     v_variant_id := (v_item->>'variant_id')::uuid;
     v_quantity := (v_item->>'quantity')::integer;
-    v_supply_type := coalesce(nullif(btrim(coalesce(v_item->>'supply_type', '')), ''), 'in_stock');
     v_preset_id := nullif(btrim(coalesce(v_item->>'processing_preset_id', '')), '');
     v_processing_note := nullif(left(btrim(coalesce(v_item->>'processing_note', '')), 500), '');
     select coalesce(array_agg(distinct value order by value), '{}') into v_option_ids
@@ -158,9 +155,20 @@ begin
       variant.price, variant.active, variant.inventory, variant.preorder_enabled
     into v_variant
     from public.product_variants variant join public.products product on product.id = variant.product_id
-    where variant.id = v_variant_id;
+    where variant.id = v_variant_id
+    for update of variant;
     if not found or not v_variant.active or v_variant.product_status <> 'available' then raise exception 'variant_unavailable'; end if;
-    if v_supply_type = 'preorder' and (v_variant.inventory <> 0 or not v_variant.preorder_enabled) then raise exception 'preorder_unavailable'; end if;
+
+    -- The locked row is authoritative. Never trust a client-supplied supply_type:
+    -- a whole line is in_stock only when the requested quantity fits current stock;
+    -- otherwise an enabled preorder variant remains one preorder line with no split.
+    if v_quantity <= v_variant.inventory then
+      v_supply_type := 'in_stock';
+    elsif v_variant.preorder_enabled then
+      v_supply_type := 'preorder';
+    else
+      raise exception 'variant_unavailable';
+    end if;
 
     if not v_variant.processing_enabled then
       v_preset_id := 'none'; v_preset_name := '不處理'; v_option_ids := '{}'; v_option_names := '{}'; v_processing_note := null;
@@ -207,7 +215,8 @@ end;
 $$;
 
 -- Keep public checkout callers backward-compatible during deployment. The modern
--- seven-argument caller supplies the retry key and explicit supply_type snapshots.
+-- seven-argument caller supplies the retry key. Supply snapshots are always decided
+-- server-side from the locked inventory row and requested quantity.
 create or replace function public.create_checkout_order(p_customer_name text, p_phone text, p_fulfillment text, p_note text, p_items jsonb, p_email text)
 returns uuid language plpgsql security definer set search_path = public, pg_temp as $$
 begin return public.create_checkout_order(p_customer_name, p_phone, p_fulfillment, p_note, p_items, p_email, gen_random_uuid()); end;

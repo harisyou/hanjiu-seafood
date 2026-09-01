@@ -39,10 +39,10 @@ test("an active product config cannot revive an inactive global option", () => {
 
 test("storefront sanitizes restore, initialization, cart editing, and checkout payload without weakening the server guard", () => {
   const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const migration = readFileSync(new URL("../supabase/f004-1-checkout-idempotency.sql", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../supabase/f004-3-3-in-stock-preorder-product-model.sql", import.meta.url), "utf8");
   assert.match(page, /activeProductProcessingPresetConfigs\(/);
   assert.match(page, /activeProductProcessingOptionConfigs\(/);
   assert.match(page, /validProcessingSelection\(/);
-  assert.match(page, /const checkoutItems = cart\.map\(\(item\) => \(\{ variant_id: item\.variant_id, quantity: item\.quantity, supply_type: item\.supply_type, processing_preset_id: item\.processing_preset_id, processing_option_ids: item\.processing_option_ids, processing_note: item\.processing_note \}\)\)/);
+  assert.match(page, /const checkoutItems = cart\.map\(\(item\) => \(\{ variant_id: item\.variant_id, quantity: item\.quantity, processing_preset_id: item\.processing_preset_id, processing_option_ids: item\.processing_option_ids, processing_note: item\.processing_note \}\)\)/);
   assert.match(migration, /raise exception 'processing_updated'/);
 });

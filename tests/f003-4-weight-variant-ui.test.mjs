@@ -25,15 +25,15 @@ test("zero-inventory variant remains visible and only non-preorder variants are 
   assert.match(storefront, /variantSupplyType\(variant\)/);
   assert.match(supplyModel, /return variant\.preorder_enabled \? "preorder" : null/);
   assert.match(storefront, /<option value=\{variant\.id\} disabled=\{unavailable\}/);
-  assert.match(storefront, /supplyType === "preorder" \? "可預訂" : "已售完"/);
+  assert.match(storefront, /variant\.preorder_enabled \? variant\.inventory > 0 \? `現貨剩 \$\{variant\.inventory\} 件｜可預訂` : "目前無現貨｜可預訂"/);
   assert.match(storefront, /const soldOut = purchasableVariants\.length === 0/);
   assert.match(storefront, /<small>\{soldOut \? "已售完" : "今日供應"\}<\/small>/);
 });
 
 test("one sold-out range does not change the product or sibling variants", () => {
   assert.doesNotMatch(storefront, /inventory\s*===?\s*0[\s\S]{0,120}status\s*:/);
-  assert.match(storefront, /setVariants\(\(current\) => current\.map\(\(variant\) => \(\{/);
-  assert.match(storefront, /inventory: Math\.max\(0, variant\.inventory - \(purchasedByVariant\.get\(variant\.id\) \|\| 0\)\)/);
+  assert.match(storefront, /setCatalogRefresh\(\(current\) => current \+ 1\)/);
+  assert.match(storefront, /The server may safely reclassify a cart line from in_stock to preorder/);
 });
 
 test("inventory admin consistently uses weight ranges and generic item units", () => {

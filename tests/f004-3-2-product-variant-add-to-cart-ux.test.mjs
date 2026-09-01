@@ -26,7 +26,7 @@ test("unselected, stale, inactive, and sold-out variants cannot be added", () =>
 
 test("the existing cart path still separates variants and immediately reports the successful add", () => {
   assert.match(page, /const cartKey = processingSignature\(variant\.id, supplyType, processingSelection\)/);
-  assert.match(page, /item\.cart_key === cartKey \? \{ \.\.\.item, quantity: item\.quantity \+ quantity \}/);
+  assert.match(page, /item\.cart_key === found\.cart_key \? \{ \.\.\.item, cart_key: cartKey, quantity: requestedQuantity, supply_type: supplyType \}/);
   assert.match(page, /variant_id: variant\.id/);
   assert.match(page, /setCartToast\(successMessage\)/);
   assert.match(page, /setCartBounceKey\(\(current\) => current \+ 1\)/);

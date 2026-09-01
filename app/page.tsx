@@ -7,7 +7,7 @@ import { filterProducts, normalizeProductSearch, sortActiveProductCategories } f
 import { isValidEmail, isValidTaiwanMobile, normalizeTaiwanMobile, taipeiCurrentTime, taipeiToday, validateTaipeiDateTime } from "@/lib/customer-validation";
 import { checkoutRequestFingerprint, checkoutRetryKey, clearCheckoutRetryKey } from "@/lib/checkout-idempotency";
 import { activeProductProcessingOptionConfigs, activeProductProcessingPresetConfigs, validProcessingSelection } from "@/lib/processing-availability";
-import { cartQuantityForVariant, remainingInStockPurchasable, variantSupplyType } from "@/lib/supply-model";
+import { cartQuantityForVariant, remainingInStockPurchasable, supplyTypeForQuantity, variantSupplyType } from "@/lib/supply-model";
 import FishRequestForm from "./fish-request-form";
 
 type SupplyType = "in_stock" | "preorder";
@@ -217,12 +217,11 @@ export default function HomePage() {
       const restored = (Array.isArray(parsed) ? parsed : []).flatMap((item) => {
         const product = products.find((candidate) => candidate.id === item.product_id);
         const variant = variants.find((candidate) => candidate.id === item.variant_id && candidate.product_id === item.product_id && candidate.active);
-        const supplyType: SupplyType = item.supply_type === "preorder" ? "preorder" : "in_stock";
         if (!product || !variant || product.status !== "available") return [];
-        if (supplyType === "preorder" && (variant.inventory !== 0 || !variant.preorder_enabled)) return [];
-        if (supplyType === "in_stock" && variant.inventory < 1) return [];
         const parsedQuantity = Number(item.quantity);
         const requestedQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
+        const supplyType = supplyTypeForQuantity(variant, requestedQuantity);
+        if (!supplyType) return [];
         const remaining = supplyType === "in_stock" ? Math.max(0, variant.inventory - (usedInventory.get(variant.id) || 0)) : requestedQuantity;
         const quantity = Math.min(requestedQuantity, remaining);
         if (quantity < 1) return [];
@@ -334,7 +333,7 @@ export default function HomePage() {
       Object.entries(selectedVariants).forEach(([productId, variantId]) => {
         const variant = variants.find((item) => item.id === variantId);
         if (!variant) return;
-        if (variantSupplyType(variant) === "preorder") {
+        if (variant.preorder_enabled) {
           const nextQuantity = Math.max(1, current[productId] || 1);
           if (nextQuantity !== current[productId]) {
             next[productId] = nextQuantity;
@@ -393,27 +392,26 @@ export default function HomePage() {
       const variantId = selectedVariants[product.id];
       const variant = variants.find((item) => item.id === variantId && item.product_id === product.id);
       if (!variant) throw new Error("加入購物車失敗，請再試一次");
-      const supplyType = variantSupplyType(variant);
-      if (product.status !== "available" || !supplyType) throw new Error("此規格目前暫不可購買，請重新選擇。");
-      if (cart.some((item) => item.variant_id === variant.id && item.supply_type !== supplyType)) throw new Error("此規格的供應狀態已更新，請先移除購物車內原有品項後重新加入。");
-      const quantityAlreadyInCart = cartQuantityForVariant(cart, variant.id, supplyType);
-      const remainingPurchasable = supplyType === "in_stock" ? getRemainingPurchasable(variant, cart) : null;
-      if (supplyType === "in_stock" && (remainingPurchasable === null || remainingPurchasable <= 0)) throw new Error("已達本次限購上限");
+      if (product.status !== "available" || !variantSupplyType(variant)) throw new Error("此規格目前暫不可購買，請重新選擇。");
       const quantity = Math.max(1, selectedQuantities[product.id] || 1);
-      if (supplyType === "in_stock" && remainingPurchasable !== null && quantity > remainingPurchasable) {
-        throw new Error(`購物車內已有 ${quantityAlreadyInCart} 件，本次最多還可加入 ${remainingPurchasable} 件`);
-      }
       const processingSelection = product.processing_enabled
         ? validProcessingSelection(productProcessing[product.id] || { presetId: null, optionIds: [], note: "" }, activeProductProcessingPresetConfigs(product.id, productProcessingPresets, processingPresets), activeProductProcessingOptionConfigs(product.id, productProcessingOptions, processingOptions))
         : { presetId: "none", optionIds: [], note: "" };
       if (product.processing_enabled && !processingSelection.presetId && processingSelection.optionIds.length === 0) throw new Error("請選擇魚貨處理方式");
       const processing = processingDisplay(product.id, processingSelection);
+      const matchingVariantItems = cart.filter((item) => item.variant_id === variant.id);
+      const sameProcessingItem = matchingVariantItems.find((item) => processingSignature(item.variant_id, item.supply_type, { presetId: item.processing_preset_id, optionIds: item.processing_option_ids, note: item.processing_note }) === processingSignature(variant.id, item.supply_type, processingSelection));
+      if (matchingVariantItems.length > 0 && !sameProcessingItem) throw new Error("此規格已在購物車，請先在購物車調整處理方式。");
+      const quantityAlreadyInCart = sameProcessingItem?.quantity || 0;
+      const requestedQuantity = quantityAlreadyInCart + quantity;
+      const supplyType = supplyTypeForQuantity(variant, requestedQuantity);
+      if (!supplyType) throw new Error(`此規格目前最多可購買 ${variant.inventory} 件。`);
       const cartKey = processingSignature(variant.id, supplyType, processingSelection);
 
       await new Promise((resolve) => setTimeout(resolve, 120));
       setCart((items) => {
-        const found = items.find((item) => item.cart_key === cartKey);
-        if (found) return items.map((item) => item.cart_key === cartKey ? { ...item, quantity: item.quantity + quantity } : item);
+        const found = items.find((item) => item.variant_id === variant.id);
+        if (found) return items.map((item) => item.cart_key === found.cart_key ? { ...item, cart_key: cartKey, quantity: requestedQuantity, supply_type: supplyType } : item);
         return [...items, { cart_key: cartKey, product_id: product.id, product_name: product.name, variant_id: variant.id, variant_name: variant.name, price: variant.price, quantity, supply_type: supplyType, processing_preset_id: processingSelection.presetId, processing_preset_name: processing.presetName, processing_option_ids: processingSelection.optionIds, processing_option_names: processing.optionNames, processing_note: processingSelection.note.trim() }];
       });
       setCartActionStatuses((current) => ({ ...current, [product.id]: "success" }));
@@ -446,23 +444,13 @@ export default function HomePage() {
     const variantId = cartItem.variant_id;
     const variant = variants.find((item) => item.id === variantId);
     if (!variant) return setNotice("無法確認此規格的限購數量，請重新整理頁面。");
-    if (cartItem.supply_type === "preorder") {
-      if (variantSupplyType(variant) !== "preorder") return setNotice("此預訂規格的供應狀態已更新，請重新選擇。");
-      setCart((items) => items.map((item) => item.cart_key === cartKey ? { ...item, quantity } : item));
-      setAnimatedCartQuantity(`${variantId}-${quantity}`);
+    const supplyType = supplyTypeForQuantity(variant, quantity);
+    if (!supplyType) {
+      setNotice(`${variant.name}本次最多可購買 ${variant.inventory} 件。`);
       return;
     }
-    const purchaseLimit = getPurchaseLimit(variant);
-    if (quantity > purchaseLimit) {
-      setNotice(`${variant.name}本次最多可購買 ${purchaseLimit} 件。`);
-      return;
-    }
-    const otherVariantQuantity = cart.filter((item) => item.variant_id === variantId && item.cart_key !== cartKey).reduce((sum, item) => sum + item.quantity, 0);
-    if (otherVariantQuantity + quantity > purchaseLimit) {
-      setNotice(`${variant.name}本次最多可購買 ${purchaseLimit} 件。`);
-      return;
-    }
-    setCart((items) => items.map((item) => item.cart_key === cartKey ? { ...item, quantity } : item));
+    const nextKey = processingSignature(variantId, supplyType, { presetId: cartItem.processing_preset_id, optionIds: cartItem.processing_option_ids, note: cartItem.processing_note });
+    setCart((items) => items.map((item) => item.cart_key === cartKey ? { ...item, cart_key: nextKey, quantity, supply_type: supplyType } : item));
     setAnimatedCartQuantity(`${variantId}-${quantity}`);
   }
 
@@ -608,16 +596,9 @@ export default function HomePage() {
 
     for (const item of cart) {
       const latestVariant = latestVariants?.find((variant) => variant.id === item.variant_id);
-      if (item.supply_type === "preorder") {
-        if (!latestVariant?.active || latestVariant.inventory !== 0 || !latestVariant.preorder_enabled) {
-          setNotice("此預訂規格的供應狀態已更新，請重新選擇。");
-          setIsSubmitting(false);
-          return;
-        }
-        continue;
-      }
-      const latestLimit = latestVariant?.active ? latestVariant.inventory : 0;
-      if (!latestVariant || item.quantity > latestLimit) {
+      const currentSupplyType = latestVariant ? supplyTypeForQuantity(latestVariant, item.quantity) : null;
+      if (!currentSupplyType) {
+        const latestLimit = latestVariant?.active ? latestVariant.inventory : 0;
         setNotice(`此規格目前最多可購買 ${latestLimit} 件，請調整購物車數量。`);
         setIsSubmitting(false);
         return;
@@ -633,7 +614,7 @@ export default function HomePage() {
       form.fulfillment === "7-ELEVEN 冷凍交貨便" && form.preferredStoreCode.trim() && `店號：${form.preferredStoreCode.trim()}`,
       form.note.trim() && `備註：${form.note.trim()}`
     ].filter(Boolean).join("\n");
-    const checkoutItems = cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity, supply_type: item.supply_type, processing_preset_id: item.processing_preset_id, processing_option_ids: item.processing_option_ids, processing_note: item.processing_note }));
+    const checkoutItems = cart.map((item) => ({ variant_id: item.variant_id, quantity: item.quantity, processing_preset_id: item.processing_preset_id, processing_option_ids: item.processing_option_ids, processing_note: item.processing_note }));
     const retryFingerprint = checkoutRequestFingerprint({
       customer_name: normalizedForm.customer_name,
       phone: normalizedPhone,
@@ -655,7 +636,7 @@ export default function HomePage() {
     if (error || !orderId) {
       console.error("Atomic checkout RPC failed", error);
       if (error?.message.includes("checkout_idempotency_conflict")) clearCheckoutRetryKey(idempotencyKey);
-      setNotice(error?.message.includes("processing_updated") ? "此商品的處理方式已更新，請重新確認。" : error?.message.includes("checkout_idempotency_conflict") ? "此筆訂單資料已變更，請重新確認後再送出。" : error?.message.includes("preorder_unavailable") ? "此預訂規格的供應狀態已更新，請重新選擇。" : error?.message.includes("variant_unavailable") ? "此現貨規格已售完或數量不足，請重新選擇。" : "訂單送出失敗，請稍後再試，或透過 LINE 與韓九聯繫。");
+      setNotice(error?.message.includes("processing_updated") ? "此商品的處理方式已更新，請重新確認。" : error?.message.includes("checkout_idempotency_conflict") ? "此筆訂單資料已變更，請重新確認後再送出。" : error?.message.includes("variant_unavailable") ? "此規格目前現貨不足且未開放預訂，請重新選擇。" : "訂單送出失敗，請稍後再試，或透過 LINE 與韓九聯繫。");
       setIsSubmitting(false);
       return;
     }
@@ -669,12 +650,9 @@ export default function HomePage() {
     }
     const text = ["海鮮訂購單", `姓名：${normalizedForm.customer_name}`, `電話：${normalizedPhone}`, "", ...cart.map((item) => { const processing = summarizedProcessing(item); return `${item.product_name}｜${item.variant_name}｜${item.supply_type === "preorder" ? "預訂" : "現貨"}｜${formatPrice(item.price)} × ${item.quantity}\n處理：${processing.name}${processing.extras.map((name) => `\n＋${name}`).join("")}${item.processing_note ? `\n備註：${item.processing_note}` : ""}`; }), "", `配送方式：${displayDeliveryMethod(form.fulfillment)}`, deliveryDetails].filter(Boolean).join("\n");
     try { await navigator.clipboard.writeText(text); } catch { /* Clipboard permission is optional. */ }
-    const purchasedByVariant = new Map<string, number>();
-    cart.filter((item) => item.supply_type === "in_stock").forEach((item) => purchasedByVariant.set(item.variant_id, (purchasedByVariant.get(item.variant_id) || 0) + item.quantity));
-    setVariants((current) => current.map((variant) => ({
-      ...variant,
-      inventory: Math.max(0, variant.inventory - (purchasedByVariant.get(variant.id) || 0))
-    })));
+    // The server may safely reclassify a cart line from in_stock to preorder after
+    // another checkout changes inventory. Reload instead of guessing local stock.
+    setCatalogRefresh((current) => current + 1);
     setCart([]);
     clearCheckoutRetryKey(idempotencyKey);
     setNotice("訂單已送出");
@@ -778,11 +756,12 @@ export default function HomePage() {
             const selectedVariant = purchasableVariants.find((variant) => variant.id === selectedVariants[product.id]);
             const selectedQuantity = selectedQuantities[product.id] || 1;
             const remainingPurchasable = selectedVariant ? getRemainingPurchasable(selectedVariant, cart) : 0;
-            const selectedSupplyType = selectedVariant ? variantSupplyType(selectedVariant) : null;
+            const quantityAlreadyInCart = selectedVariant ? cartQuantityForVariant(cart, selectedVariant.id) : 0;
+            const selectedSupplyType = selectedVariant ? supplyTypeForQuantity(selectedVariant, quantityAlreadyInCart + selectedQuantity) : null;
             const soldOut = purchasableVariants.length === 0;
             const staleSelectedVariant = Boolean(selectedVariants[product.id] && !selectedVariant);
             const hasMultipleVariantPrices = new Set(displayVariants.map((variant) => variant.price)).size > 1;
-            const cartLimitReached = Boolean(selectedVariant && selectedSupplyType === "in_stock" && remainingPurchasable <= 0);
+            const cartLimitReached = Boolean(selectedVariant && !selectedVariant.preorder_enabled && remainingPurchasable <= 0);
             const cartActionStatus = cartActionStatuses[product.id] || "idle";
             const availableProcessingOptions = activeProductProcessingOptionConfigs(product.id, productProcessingOptions, processingOptions).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
             const availableProcessingPresets = activeProductProcessingPresetConfigs(product.id, productProcessingPresets, processingPresets).map((config) => ({ config, preset: processingPresets.find((preset) => preset.id === config.preset_id) })).filter((item): item is { config: ProductProcessingPreset; preset: ProcessingPreset } => Boolean(item.preset));
@@ -812,7 +791,7 @@ export default function HomePage() {
                     {displayVariants.map((variant) => {
                       const supplyType = variantSupplyType(variant);
                       const unavailable = product.status !== "available" || !supplyType;
-                      const availability = supplyType === "in_stock" ? `現貨｜剩 ${variant.inventory} 件` : supplyType === "preorder" ? "可預訂" : "已售完";
+                      const availability = variant.preorder_enabled ? variant.inventory > 0 ? `現貨剩 ${variant.inventory} 件｜可預訂` : "目前無現貨｜可預訂" : supplyType === "in_stock" ? `現貨剩 ${variant.inventory} 件` : "已售完";
                       return <option value={variant.id} disabled={unavailable} key={variant.id}>{variant.name}｜{formatPrice(variant.price)}｜{availability}</option>;
                     })}
                   </select>
@@ -822,7 +801,7 @@ export default function HomePage() {
                     <div className="variantDetails variantSelectionSummary" aria-live="polite" aria-atomic="true">
                       <div className="variantSelectedName"><span>已選規格</span><strong>{selectedVariant.name}</strong></div>
                       <div className="variantSelectedPrice"><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
-                      <div className={`variantPurchaseStatus ${cartLimitReached ? "isUnavailable" : ""}`}><span>供應狀態</span><strong>{selectedSupplyType === "preorder" ? "可預訂" : cartLimitReached ? "已達本次限購上限" : `現貨｜剩 ${remainingPurchasable} 件`}</strong>{selectedSupplyType === "preorder" ? <small>到貨後由我們與您確認。</small> : !cartLimitReached && <small>本次可購買 {remainingPurchasable} 件</small>}{remainingPurchasable === 1 && selectedSupplyType === "in_stock" && !cartLimitReached && <small className="rareNotice">🔥 最後一件</small>}</div>
+                      <div className={`variantPurchaseStatus ${cartLimitReached ? "isUnavailable" : ""}`}><span>供應狀態</span><strong>{selectedVariant.preorder_enabled ? selectedVariant.inventory > 0 ? `現貨剩 ${selectedVariant.inventory} 件｜可預訂` : "目前無現貨｜可預訂" : cartLimitReached ? "已達本次限購上限" : `現貨剩 ${remainingPurchasable} 件`}</strong>{selectedVariant.preorder_enabled ? <small>{selectedSupplyType === "preorder" ? `目前現貨 ${selectedVariant.inventory} 件，此數量將以預訂方式處理。` : "超過現貨數量仍可預訂。"}</small> : !cartLimitReached && <small>本次可購買 {remainingPurchasable} 件</small>}{remainingPurchasable === 1 && !selectedVariant.preorder_enabled && selectedSupplyType === "in_stock" && !cartLimitReached && <small className="rareNotice">🔥 最後一件</small>}</div>
                     </div>
                     {product.processing_enabled && <section className="productProcessing" aria-labelledby={`processing-${product.id}`}>
                       <h4 id={`processing-${product.id}`}>🐟 魚貨處理方式</h4>
@@ -834,9 +813,9 @@ export default function HomePage() {
                     <div className="variantQuantity">
                       <span>數量</span>
                       <div>
-                        <button type="button" aria-label="減少數量" disabled={selectedQuantity <= 1 || cartLimitReached} onClick={() => setProductQuantity(product.id, selectedSupplyType === "in_stock" ? remainingPurchasable : null, selectedQuantity - 1)}>−</button>
+                        <button type="button" aria-label="減少數量" disabled={selectedQuantity <= 1 || cartLimitReached} onClick={() => setProductQuantity(product.id, selectedVariant.preorder_enabled ? null : remainingPurchasable, selectedQuantity - 1)}>−</button>
                         <strong className="quantityValue" key={`${selectedVariant.id}-${selectedQuantity}`}>{selectedQuantity}</strong>
-                        <button type="button" aria-label="增加數量" disabled={cartLimitReached || (selectedSupplyType === "in_stock" && selectedQuantity >= remainingPurchasable)} onClick={() => setProductQuantity(product.id, selectedSupplyType === "in_stock" ? remainingPurchasable : null, selectedQuantity + 1, true)}>＋</button>
+                        <button type="button" aria-label="增加數量" disabled={cartLimitReached || (!selectedVariant.preorder_enabled && selectedQuantity >= remainingPurchasable)} onClick={() => setProductQuantity(product.id, selectedVariant.preorder_enabled ? null : remainingPurchasable, selectedQuantity + 1, true)}>＋</button>
                       </div>
                     </div>
                   </>}
@@ -865,16 +844,16 @@ export default function HomePage() {
               const variant = variants.find((candidate) => candidate.id === item.variant_id);
               const product = products.find((candidate) => candidate.id === item.product_id);
               const purchaseLimit = variant ? getPurchaseLimit(variant) : item.quantity;
-              const totalVariantQuantity = cartQuantityForVariant(cart, item.variant_id, item.supply_type);
+              const totalVariantQuantity = cartQuantityForVariant(cart, item.variant_id);
               const cartBusy = cartActionStatuses[item.product_id] === "adding";
               const cartPresets = activeProductProcessingPresetConfigs(item.product_id, productProcessingPresets, processingPresets).map((config) => processingPresets.find((preset) => preset.id === config.preset_id)).filter((preset): preset is ProcessingPreset => Boolean(preset));
               const cartOptions = activeProductProcessingOptionConfigs(item.product_id, productProcessingOptions, processingOptions).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
               const processingSummary = summarizedProcessing(item);
               return <article className={`drawerCartItem ${item.supply_type === "preorder" ? "isPreorder" : "isInStock"}`} key={item.cart_key}>
                 <div className="drawerItemImage">{product?.image_url ? <img src={product.image_url} alt={item.product_name} /> : <span>🐟</span>}</div>
-                <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className={`cartSupplyBadge ${item.supply_type === "preorder" ? "isPreorder" : "isInStock"}`}>{item.supply_type === "preorder" ? "🟠 預訂" : "🟢 現貨"}</span>{item.supply_type === "preorder" && <small className="preorderCartNotice">此商品將依實際漁獲安排，到貨後與您確認。</small>}<span className="priceTag"><small>單價</small>{formatPrice(item.price)}</span><div className="cartProcessingSummary"><strong>處理：{processingSummary.name}</strong>{processingSummary.extras.map((name) => <span key={name}>＋{name}</span>)}{item.processing_note && <span>其他需求：{item.processing_note}</span>}</div><strong className="itemSubtotal"><span>小計</span>{formatPrice(item.price * item.quantity)}</strong></div>
+                <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className={`cartSupplyBadge ${item.supply_type === "preorder" ? "isPreorder" : "isInStock"}`}>{item.supply_type === "preorder" ? "🟠 預訂" : "🟢 現貨"}</span>{item.supply_type === "preorder" && <small className="preorderCartNotice">目前現貨 {variant?.inventory || 0} 件，此數量將以預訂方式處理。</small>}<span className="priceTag"><small>單價</small>{formatPrice(item.price)}</span><div className="cartProcessingSummary"><strong>處理：{processingSummary.name}</strong>{processingSummary.extras.map((name) => <span key={name}>＋{name}</span>)}{item.processing_note && <span>其他需求：{item.processing_note}</span>}</div><strong className="itemSubtotal"><span>小計</span>{formatPrice(item.price * item.quantity)}</strong></div>
                 {product?.processing_enabled && <details className="cartProcessingEditor"><summary>編輯處理方式</summary><div><div className="cartProcessingPresets">{cartPresets.map((preset) => <button type="button" className={item.processing_preset_id === preset.id ? "isSelected" : ""} onClick={() => selectCartPreset(item, preset.id)} key={preset.id}>{preset.name}</button>)}</div><div className="cartProcessingOptions">{cartOptions.map((option) => <label key={option.id}><input type="checkbox" checked={item.processing_option_ids.includes(option.id)} onChange={() => toggleCartOption(item, option.id)} />{option.name}</label>)}</div><label>其他處理需求<textarea rows={2} defaultValue={item.processing_note} onBlur={(event) => updateCartProcessing(item.cart_key, { presetId: item.processing_preset_id, optionIds: item.processing_option_ids, note: event.target.value })} /></label></div></details>}
-                <div className="drawerItemActions"><div className="quantity"><button type="button" aria-label={`減少 ${item.variant_name} 數量`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, item.quantity - 1)}>−</button><span className={animatedCartQuantity === `${item.variant_id}-${item.quantity}` ? "cartQuantityPulse" : ""} key={`${item.variant_id}-${item.quantity}`}>{item.quantity}</span><button type="button" aria-label={`增加 ${item.variant_name} 數量`} disabled={cartBusy || !variant || (item.supply_type === "in_stock" && totalVariantQuantity >= purchaseLimit)} onClick={() => changeQuantity(item.cart_key, item.quantity + 1)}>＋</button></div><button className="removeCartItem" type="button" aria-label={`移除${item.product_name} ${item.variant_name}`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, 0)}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>
+                <div className="drawerItemActions"><div className="quantity"><button type="button" aria-label={`減少 ${item.variant_name} 數量`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, item.quantity - 1)}>−</button><span className={animatedCartQuantity === `${item.variant_id}-${item.quantity}` ? "cartQuantityPulse" : ""} key={`${item.variant_id}-${item.quantity}`}>{item.quantity}</span><button type="button" aria-label={`增加 ${item.variant_name} 數量`} disabled={cartBusy || !variant || (!variant.preorder_enabled && totalVariantQuantity >= purchaseLimit)} onClick={() => changeQuantity(item.cart_key, item.quantity + 1)}>＋</button></div><button className="removeCartItem" type="button" aria-label={`移除${item.product_name} ${item.variant_name}`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, 0)}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>
               </article>;
             })}
           </div>
