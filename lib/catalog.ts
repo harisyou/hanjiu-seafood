@@ -29,6 +29,7 @@ export type ProductVariant = {
   name: string;
   price: number;
   inventory: number;
+  preorder_enabled?: boolean;
   active: boolean;
   sort_order: number;
 };
@@ -41,7 +42,7 @@ export type ProductProcessingPreset = { product_id: string; preset_id: string; a
 
 export function inventoryLabel(inventory: number) {
   if (inventory <= 0) return "已售完";
-  if (inventory === 1) return "最後1份";
+  if (inventory === 1) return "最後1件";
   if (inventory <= 3) return "剩少量";
   return "現貨充足";
 }

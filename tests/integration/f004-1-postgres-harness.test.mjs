@@ -9,6 +9,13 @@ const fixture = {
   customerName: process.env.F004_1_TEST_CUSTOMER_NAME || "F004-1 integration customer",
   phone: process.env.F004_1_TEST_PHONE || "0912345678"
 };
+const preorderFixture = {
+  variantId: process.env.F004_3_3_TEST_PREORDER_VARIANT_ID,
+  customerName: process.env.F004_3_3_TEST_CUSTOMER_NAME || "F004-3.3 preorder integration customer",
+  phone: process.env.F004_3_3_TEST_PHONE || "0912345678",
+  quantity: Number(process.env.F004_3_3_TEST_PREORDER_QUANTITY || "2")
+};
+const preorderEnabled = process.env.F004_3_3_ALLOW_DATABASE_TESTS === "1";
 
 function psql(sql) {
   return spawnSync("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", "-At", "-c", sql], { encoding: "utf8" });
@@ -39,4 +46,24 @@ test("PostgreSQL: concurrent same-key checkout creates one order and one movemen
   const counts = psql(`select (select count(*) from public.orders where id = '${orderId}'::uuid), (select count(*) from public.order_items where order_id = '${orderId}'::uuid), (select count(*) from public.inventory_movements where order_id = '${orderId}'::uuid and movement_type = 'checkout_sale')`);
   assert.equal(counts.status, 0, counts.stderr);
   assert.equal(counts.stdout.trim(), "1|1|1");
+});
+
+test("PostgreSQL: server derives an overage preorder line without inventory or ledger mutation", { skip: !preorderEnabled || !url || !preorderFixture.variantId }, () => {
+  const keyResult = psql("select gen_random_uuid()");
+  assert.equal(keyResult.status, 0, keyResult.stderr);
+  const key = keyResult.stdout.trim();
+  const before = psql(`select inventory from public.product_variants where id = '${preorderFixture.variantId}'::uuid`);
+  assert.equal(before.status, 0, before.stderr);
+  const inventoryBefore = Number(before.stdout.trim());
+  assert.ok(Number.isInteger(inventoryBefore) && inventoryBefore >= 0, "fixture must be an active preorder-enabled variant");
+  assert.ok(Number.isInteger(preorderFixture.quantity) && preorderFixture.quantity > inventoryBefore, "test quantity must exceed the fixture's current inventory");
+  // No client supply_type is sent: the locked variant row is authoritative.
+  const payload = `jsonb_build_array(jsonb_build_object('variant_id', '${preorderFixture.variantId}'::uuid, 'quantity', ${preorderFixture.quantity}, 'processing_option_ids', '[]'::jsonb))`;
+  const call = `select public.create_checkout_order('${preorderFixture.customerName.replace(/'/g, "''")}', '${preorderFixture.phone}', '永春市場自取', null, ${payload}, null, '${key}'::uuid)`;
+  const created = psql(call);
+  assert.equal(created.status, 0, created.stderr);
+  const orderId = created.stdout.trim();
+  const facts = psql(`select (select inventory from public.product_variants where id = '${preorderFixture.variantId}'::uuid), (select count(*) from public.order_items where order_id = '${orderId}'::uuid and supply_type = 'preorder'), (select count(*) from public.inventory_movements where order_id = '${orderId}'::uuid)`);
+  assert.equal(facts.status, 0, facts.stderr);
+  assert.equal(facts.stdout.trim(), `${inventoryBefore}|1|0`);
 });

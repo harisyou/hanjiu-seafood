@@ -27,6 +27,7 @@ export type AdminOrderItem = {
   product_name: string;
   variant_name: string | null;
   quantity: number;
+  supply_type?: "in_stock" | "preorder";
   price: number | null;
   processing_preset_id: string | null;
   processing_preset_name: string | null;

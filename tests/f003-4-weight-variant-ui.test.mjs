@@ -7,6 +7,7 @@ const inventoryPage = readFileSync(new URL("../app/admin/inventory/page.tsx", im
 const inventoryDetail = readFileSync(new URL("../app/admin/inventory/[id]/page.tsx", import.meta.url), "utf8");
 const variantsPage = readFileSync(new URL("../app/admin/variants/page.tsx", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../supabase/f001-product-variants.sql", import.meta.url), "utf8");
+const supplyModel = readFileSync(new URL("../lib/supply-model.mjs", import.meta.url), "utf8");
 
 test("existing variant schema supports range name, fixed price, and remaining fish count", () => {
   assert.match(schema, /name text not null/);
@@ -19,25 +20,26 @@ test("storefront explains that ranges use pre-processing weight", () => {
   assert.ok(storefront.includes("重量皆以魚貨處理前秤重為準，去鱗、去鰓、去內臟等處理後，實際收到重量會減少。"));
 });
 
-test("zero-inventory variant remains visible but disabled as sold out", () => {
+test("zero-inventory variant remains visible and only non-preorder variants are disabled", () => {
   assert.match(storefront, /displayVariants\.map/);
-  assert.match(storefront, /variant\.inventory <= 0/);
+  assert.match(storefront, /variantSupplyType\(variant\)/);
+  assert.match(supplyModel, /return variant\.preorder_enabled \? "preorder" : null/);
   assert.match(storefront, /<option value=\{variant\.id\} disabled=\{unavailable\}/);
-  assert.match(storefront, /unavailable \? "｜已售完"/);
+  assert.match(storefront, /variant\.preorder_enabled \? variant\.inventory > 0 \? `現貨剩 \$\{variant\.inventory\} 件｜可預訂` : "目前無現貨｜可預訂"/);
   assert.match(storefront, /const soldOut = purchasableVariants\.length === 0/);
   assert.match(storefront, /<small>\{soldOut \? "已售完" : "今日供應"\}<\/small>/);
 });
 
 test("one sold-out range does not change the product or sibling variants", () => {
   assert.doesNotMatch(storefront, /inventory\s*===?\s*0[\s\S]{0,120}status\s*:/);
-  assert.match(storefront, /setVariants\(\(current\) => current\.map\(\(variant\) => \(\{/);
-  assert.match(storefront, /inventory: Math\.max\(0, variant\.inventory - \(purchasedByVariant\.get\(variant\.id\) \|\| 0\)\)/);
+  assert.match(storefront, /setCatalogRefresh\(\(current\) => current \+ 1\)/);
+  assert.match(storefront, /The server may safely reclassify a cart line from in_stock to preorder/);
 });
 
-test("inventory admin consistently uses weight ranges and remaining fish count", () => {
+test("inventory admin consistently uses weight ranges and generic item units", () => {
   for (const source of [inventoryPage, inventoryDetail, variantsPage]) {
     assert.ok(source.includes("150g～200g"));
-    assert.ok(source.includes("剩餘尾數"));
+    assert.ok(source.includes("現貨件數"));
   }
   assert.ok(inventoryPage.includes("固定售價"));
   assert.ok(inventoryDetail.includes("處理前"));

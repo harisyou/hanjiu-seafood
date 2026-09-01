@@ -57,7 +57,7 @@ test("sold-out cards keep the status in their information area without obscuring
   assert.match(page, /<small>\{soldOut \? "已售完" : "今日供應"\}<\/small>/);
   assert.match(page, /product\.featured && <div className="productCardBadges"><b>本日精選<\/b><\/div>/);
   assert.match(page, /選擇規格/);
-  assert.match(page, /本次還可購買/);
+  assert.match(page, /本次可購買/);
   assert.match(page, /加入購物車/);
   assert.match(page, /disabled=\{unavailable\}/);
 });

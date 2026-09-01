@@ -30,6 +30,6 @@ export function isDraftVariantAvailable(variant: ProductVariant) {
 
 export function validateDraftQuantity(quantity: number, inventory: number) {
   if (!Number.isInteger(quantity) || quantity < 1) return "數量必須是至少 1 的整數";
-  if (quantity > inventory) return "目前最多可建立 " + inventory + " 尾";
+  if (quantity > inventory) return "目前最多可建立 " + inventory + " 件";
   return "";
 }
