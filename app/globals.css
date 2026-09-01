@@ -256,10 +256,9 @@ nav{display:flex;justify-content:space-between;align-items:center}nav div{displa
 .storefrontProductCard .photo{height:auto;aspect-ratio:4/3;overflow:hidden;background:linear-gradient(135deg,#e8f2ef,#dcebe6)}
 .storefrontProductCard .photo img{transition:transform 260ms ease}
 .storefrontProductCard:hover .photo img{transform:scale(1.025)}
-.productCardBadges{position:absolute;inset:14px 14px auto;display:flex;align-items:center;justify-content:space-between;gap:8px;pointer-events:none}
-.storefrontProductCard .photo b,.productAvailability{position:static;display:inline-flex;min-height:30px;align-items:center;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:900;box-shadow:0 4px 12px rgba(15,48,43,.12)}
+.productCardBadges{position:absolute;inset:14px 14px auto;display:flex;align-items:center;gap:8px;pointer-events:none}
+.storefrontProductCard .photo b{position:static;display:inline-flex;min-height:30px;align-items:center;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:900;box-shadow:0 4px 12px rgba(15,48,43,.12)}
 .storefrontProductCard .photo b{margin:0;background:rgba(255,255,255,.93);color:#24584d}
-.productAvailability{margin-left:auto}.productAvailability.isAvailable{background:#e7f3ed;color:#246853}.productAvailability.isSoldOut{background:#f2eee8;color:#725f46}
 .storefrontProductCard .body{display:flex;min-width:0;flex:1;flex-direction:column;padding:22px}
 .productCardIntro small{display:block;color:#52716b;font-size:12px;font-weight:800;letter-spacing:.02em}
 .productCardIntro span{display:block;margin-top:3px;color:#52716b;font-size:12px;font-weight:700}

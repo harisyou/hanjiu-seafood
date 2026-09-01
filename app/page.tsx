@@ -769,7 +769,7 @@ export default function HomePage() {
                     ? "✓ 已加入購物車"
                     : "加入購物車";
             return <article className={`card storefrontProductCard ${soldOut ? "isSoldOut" : "isAvailable"}`} key={product.id}>
-              <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span aria-label="尚無商品圖片" role="img">🐟</span>}<div className="productCardBadges">{product.featured && <b>本日精選</b>}<span className={soldOut ? "productAvailability isSoldOut" : "productAvailability isAvailable"}>{soldOut ? "已售完" : "可購買"}</span></div></div>
+              <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span aria-label="尚無商品圖片" role="img">🐟</span>}{product.featured && <div className="productCardBadges"><b>本日精選</b></div>}</div>
               <div className="body"><div className="productCardIntro"><div><small>{soldOut ? "已售完" : "今日供應"}</small>{!soldOut && <span>{purchasableVariants.length} 個可購買規格</span>}<h3>{product.name}</h3></div></div><p className="productDescription">{product.description || "今日新鮮上架，規格與價格請見下方。"}</p><p className="productCooking">料理建議：{product.cooking || "歡迎詢問"}</p>
                 {displayVariants.length > 0 && <div className="variantSelector">
                   <label htmlFor={`variant-${product.id}`}>選擇規格</label>

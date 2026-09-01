@@ -51,10 +51,11 @@ test("anonymous category reads never evaluate the admin authorization function",
   assert.match(categoryReadPolicy, /commit;/i);
 });
 
-test("product cards communicate availability and preserve the existing variant selection controls", () => {
+test("sold-out cards keep the status in their information area without obscuring the photo", () => {
   assert.match(page, /storefrontProductCard/);
-  assert.match(page, /productAvailability isSoldOut/);
-  assert.match(page, /productAvailability isAvailable/);
+  assert.doesNotMatch(page, /productAvailability/);
+  assert.match(page, /<small>\{soldOut \? "已售完" : "今日供應"\}<\/small>/);
+  assert.match(page, /product\.featured && <div className="productCardBadges"><b>本日精選<\/b><\/div>/);
   assert.match(page, /選擇規格/);
   assert.match(page, /本次還可購買/);
   assert.match(page, /加入購物車/);
