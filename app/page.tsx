@@ -751,6 +751,8 @@ export default function HomePage() {
             const selectedQuantity = selectedQuantities[product.id] || 1;
             const remainingPurchasable = selectedVariant ? getRemainingPurchasable(selectedVariant, cart) : 0;
             const soldOut = purchasableVariants.length === 0;
+            const staleSelectedVariant = Boolean(selectedVariants[product.id] && !selectedVariant);
+            const hasMultipleVariantPrices = new Set(displayVariants.map((variant) => variant.price)).size > 1;
             const cartLimitReached = Boolean(selectedVariant && remainingPurchasable <= 0);
             const cartActionStatus = cartActionStatuses[product.id] || "idle";
             const availableProcessingOptions = activeProductProcessingOptionConfigs(product.id, productProcessingOptions, processingOptions).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
@@ -759,6 +761,8 @@ export default function HomePage() {
             const processingSelectionDisplay = summarizedSelection(product.id, processingSelection);
             const addButtonText = soldOut
               ? "已售完"
+              : staleSelectedVariant
+                ? "請重新選擇規格"
               : !selectedVariant
                 ? "請先選擇規格"
                 : cartLimitReached
@@ -773,6 +777,7 @@ export default function HomePage() {
               <div className="body"><div className="productCardIntro"><div><small>{soldOut ? "已售完" : "今日供應"}</small>{!soldOut && <span>{purchasableVariants.length} 個可購買規格</span>}<h3>{product.name}</h3></div></div><p className="productDescription">{product.description || "今日新鮮上架，規格與價格請見下方。"}</p><p className="productCooking">料理建議：{product.cooking || "歡迎詢問"}</p>
                 {displayVariants.length > 0 && <div className="variantSelector">
                   <label htmlFor={`variant-${product.id}`}>選擇規格</label>
+                  <p className="variantSelectorHint">{selectedVariant ? "已依您選擇更新價格與可購買狀態。" : hasMultipleVariantPrices ? "不同規格有不同價格，請選擇後查看確切價格。" : "請選擇規格查看價格與可購買狀態。"}</p>
                   <select id={`variant-${product.id}`} value={selectedVariants[product.id] || ""} onChange={(event) => selectVariant(product.id, event.target.value)}>
                     <option value="" disabled>請選擇規格</option>
                     {displayVariants.map((variant) => {
@@ -781,10 +786,12 @@ export default function HomePage() {
                     })}
                   </select>
                   <p className="weightBasisNotice">重量皆以魚貨處理前秤重為準，去鱗、去鰓、去內臟等處理後，實際收到重量會減少。</p>
+                  {staleSelectedVariant && !soldOut && <p className="variantUnavailableNotice" role="status">此規格目前無法購買，請重新選擇。</p>}
                   {selectedVariant && <>
-                    <div className="variantDetails">
-                      <div><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
-                      <div><span>本次還可購買</span><strong>{remainingPurchasable} 隻</strong>{remainingPurchasable === 1 && <small className="rareNotice">🔥 最後一份</small>}</div>
+                    <div className="variantDetails variantSelectionSummary" aria-live="polite" aria-atomic="true">
+                      <div className="variantSelectedName"><span>已選規格</span><strong>{selectedVariant.name}</strong></div>
+                      <div className="variantSelectedPrice"><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
+                      <div className={`variantPurchaseStatus ${cartLimitReached ? "isUnavailable" : ""}`}><span>可購買狀態</span><strong>{cartLimitReached ? "已達本次限購上限" : "可加入購物車"}</strong>{!cartLimitReached && <small>本次還可購買 {remainingPurchasable} 隻</small>}{remainingPurchasable === 1 && !cartLimitReached && <small className="rareNotice">🔥 最後一份</small>}</div>
                     </div>
                     {product.processing_enabled && <section className="productProcessing" aria-labelledby={`processing-${product.id}`}>
                       <h4 id={`processing-${product.id}`}>🐟 魚貨處理方式</h4>
