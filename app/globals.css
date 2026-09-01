@@ -281,20 +281,21 @@ nav{display:flex;justify-content:space-between;align-items:center}nav div{displa
 .storefrontProductCard .variantSelector select:focus-visible{border-color:#0f5a52;box-shadow:0 0 0 3px rgba(15,90,82,.16)}
 .storefrontProductCard .weightBasisNotice{margin:0;color:#6c7e79;font-size:12px;line-height:1.5}
 .variantUnavailableNotice{margin:0;padding:9px 11px;border:1px solid #e2c8bb;border-radius:10px;background:#fff8f4;color:#8a4933;font-size:13px;font-weight:750;line-height:1.45}
-.storefrontProductCard .variantSelectionSummary{grid-template-columns:minmax(0,1fr) auto;gap:10px;margin-top:4px}
+.storefrontProductCard .variantSelectionSummary{grid-template-columns:minmax(120px,.85fr) minmax(0,1.15fr);gap:10px;margin-top:4px}
 .storefrontProductCard .variantSelectionSummary>div{min-width:0;padding:12px 13px;border:1px solid #dbe9e5;border-radius:12px;background:#f5faf8}
 .storefrontProductCard .variantSelectionSummary .variantSelectedName{grid-column:1/-1;padding-bottom:10px;background:#fff}
 .storefrontProductCard .variantSelectionSummary .variantSelectedName strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1d4d45;font-size:16px}
-.storefrontProductCard .variantSelectionSummary .variantSelectedPrice strong{color:#0f5a52;font-size:22px;line-height:1.1}
-.storefrontProductCard .variantSelectionSummary .variantPurchaseStatus{align-items:flex-end;text-align:right}
-.storefrontProductCard .variantSelectionSummary .variantPurchaseStatus strong{color:#287a5d;font-size:15px}
+.storefrontProductCard .variantSelectionSummary .variantSelectedPrice strong{color:#0f5a52;font-size:22px;line-height:1.1;white-space:nowrap;font-variant-numeric:tabular-nums}
+.storefrontProductCard .variantSelectionSummary .variantPurchaseStatus{align-items:flex-start;text-align:left}
+.storefrontProductCard .variantSelectionSummary .variantPurchaseStatus strong{color:#287a5d;font-size:15px;overflow-wrap:anywhere}
 .storefrontProductCard .variantSelectionSummary .variantPurchaseStatus small{color:#5a716b;font-size:12px;font-weight:700}
 .storefrontProductCard .variantSelectionSummary .variantPurchaseStatus.isUnavailable strong{color:#8a4933}
 .storefrontProductCard .variantQuantity{margin-top:16px}
 .storefrontProductCard .variantQuantity>div{gap:18px}
 .storefrontProductCard .variantQuantity button{width:48px;height:48px;border-radius:12px}
+.storefrontProductCard .excessPreorderNotice{max-width:100%;margin:9px 0 0;padding:8px 10px;border-radius:9px;background:#fff7ed;color:#92531f;font-size:13px;font-weight:750;line-height:1.45;overflow-wrap:anywhere}
 .storefrontProductCard .addToCartButton{min-height:52px;margin-top:20px;border-radius:12px;font-size:16px}
-@media(max-width:700px){.storefrontProductCard .variantSelector{gap:8px}.storefrontProductCard .variantSelector select{min-height:54px}.storefrontProductCard .variantSelectionSummary{gap:8px}.storefrontProductCard .variantSelectionSummary>div{padding:11px 12px}.storefrontProductCard .variantSelectionSummary .variantSelectedPrice strong{font-size:21px}.storefrontProductCard .variantQuantity button{width:48px;height:48px}.storefrontProductCard .addToCartButton{min-height:54px;margin-top:18px}}
+@media(max-width:700px){.storefrontProductCard .variantSelector{gap:8px}.storefrontProductCard .variantSelector select{min-height:54px}.storefrontProductCard .variantSelectionSummary{grid-template-columns:minmax(112px,.82fr) minmax(0,1.18fr);gap:8px}.storefrontProductCard .variantSelectionSummary>div{padding:11px 12px}.storefrontProductCard .variantSelectionSummary .variantSelectedPrice strong{font-size:clamp(18px,5.4vw,21px)}.storefrontProductCard .variantQuantity button{width:48px;height:48px}.storefrontProductCard .addToCartButton{min-height:54px;margin-top:18px}}
 
 /* F004-3.3 supply type snapshots: status is distinct from mutable inventory. */
 .cartSupplyBadge{display:inline-flex;align-items:center;width:max-content;margin:0 0 8px;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:800;line-height:1.2}

@@ -7,7 +7,7 @@ import { filterProducts, normalizeProductSearch, sortActiveProductCategories } f
 import { isValidEmail, isValidTaiwanMobile, normalizeTaiwanMobile, taipeiCurrentTime, taipeiToday, validateTaipeiDateTime } from "@/lib/customer-validation";
 import { checkoutRequestFingerprint, checkoutRetryKey, clearCheckoutRetryKey } from "@/lib/checkout-idempotency";
 import { activeProductProcessingOptionConfigs, activeProductProcessingPresetConfigs, validProcessingSelection } from "@/lib/processing-availability";
-import { cartQuantityForVariant, remainingInStockPurchasable, supplyTypeForQuantity, variantSupplyType } from "@/lib/supply-model";
+import { cartQuantityForVariant, remainingInStockPurchasable, shouldShowExcessPreorderNotice, supplyTypeForQuantity, variantSupplyType } from "@/lib/supply-model";
 import FishRequestForm from "./fish-request-form";
 
 type SupplyType = "in_stock" | "preorder";
@@ -758,6 +758,7 @@ export default function HomePage() {
             const remainingPurchasable = selectedVariant ? getRemainingPurchasable(selectedVariant, cart) : 0;
             const quantityAlreadyInCart = selectedVariant ? cartQuantityForVariant(cart, selectedVariant.id) : 0;
             const selectedSupplyType = selectedVariant ? supplyTypeForQuantity(selectedVariant, quantityAlreadyInCart + selectedQuantity) : null;
+            const showExcessPreorderNotice = Boolean(selectedVariant && shouldShowExcessPreorderNotice(selectedVariant, quantityAlreadyInCart + selectedQuantity));
             const soldOut = purchasableVariants.length === 0;
             const staleSelectedVariant = Boolean(selectedVariants[product.id] && !selectedVariant);
             const hasMultipleVariantPrices = new Set(displayVariants.map((variant) => variant.price)).size > 1;
@@ -791,8 +792,7 @@ export default function HomePage() {
                     {displayVariants.map((variant) => {
                       const supplyType = variantSupplyType(variant);
                       const unavailable = product.status !== "available" || !supplyType;
-                      const availability = variant.preorder_enabled ? variant.inventory > 0 ? `現貨剩 ${variant.inventory} 件｜可預訂` : "目前無現貨｜可預訂" : supplyType === "in_stock" ? `現貨剩 ${variant.inventory} 件` : "已售完";
-                      return <option value={variant.id} disabled={unavailable} key={variant.id}>{variant.name}｜{formatPrice(variant.price)}｜{availability}</option>;
+                      return <option value={variant.id} disabled={unavailable} key={variant.id}>{variant.name}｜{formatPrice(variant.price)}</option>;
                     })}
                   </select>
                   <p className="weightBasisNotice">重量皆以魚貨處理前秤重為準，去鱗、去鰓、去內臟等處理後，實際收到重量會減少。</p>
@@ -801,7 +801,7 @@ export default function HomePage() {
                     <div className="variantDetails variantSelectionSummary" aria-live="polite" aria-atomic="true">
                       <div className="variantSelectedName"><span>已選規格</span><strong>{selectedVariant.name}</strong></div>
                       <div className="variantSelectedPrice"><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
-                      <div className={`variantPurchaseStatus ${cartLimitReached ? "isUnavailable" : ""}`}><span>供應狀態</span><strong>{selectedVariant.preorder_enabled ? selectedVariant.inventory > 0 ? `現貨剩 ${selectedVariant.inventory} 件｜可預訂` : "目前無現貨｜可預訂" : cartLimitReached ? "已達本次限購上限" : `現貨剩 ${remainingPurchasable} 件`}</strong>{selectedVariant.preorder_enabled ? <small>{selectedSupplyType === "preorder" ? `目前現貨 ${selectedVariant.inventory} 件，此數量將以預訂方式處理。` : "超過現貨數量仍可預訂。"}</small> : !cartLimitReached && <small>本次可購買 {remainingPurchasable} 件</small>}{remainingPurchasable === 1 && !selectedVariant.preorder_enabled && selectedSupplyType === "in_stock" && !cartLimitReached && <small className="rareNotice">🔥 最後一件</small>}</div>
+                      <div className={`variantPurchaseStatus ${cartLimitReached ? "isUnavailable" : ""}`}><span>供應狀態</span><strong>{selectedVariant.preorder_enabled ? selectedVariant.inventory > 0 ? `現貨剩 ${selectedVariant.inventory} 件｜可預訂` : "目前無現貨｜可預訂" : cartLimitReached ? "已達本次限購上限" : `現貨剩 ${remainingPurchasable} 件`}</strong>{!selectedVariant.preorder_enabled && !cartLimitReached && <small>本次可購買 {remainingPurchasable} 件</small>}{remainingPurchasable === 1 && !selectedVariant.preorder_enabled && selectedSupplyType === "in_stock" && !cartLimitReached && <small className="rareNotice">🔥 最後一件</small>}</div>
                     </div>
                     {product.processing_enabled && <section className="productProcessing" aria-labelledby={`processing-${product.id}`}>
                       <h4 id={`processing-${product.id}`}>🐟 魚貨處理方式</h4>
@@ -817,6 +817,7 @@ export default function HomePage() {
                         <strong className="quantityValue" key={`${selectedVariant.id}-${selectedQuantity}`}>{selectedQuantity}</strong>
                         <button type="button" aria-label="增加數量" disabled={cartLimitReached || (!selectedVariant.preorder_enabled && selectedQuantity >= remainingPurchasable)} onClick={() => setProductQuantity(product.id, selectedVariant.preorder_enabled ? null : remainingPurchasable, selectedQuantity + 1, true)}>＋</button>
                       </div>
+                      {showExcessPreorderNotice && <p className="excessPreorderNotice" role="status">超過現貨數量，將以預訂方式處理</p>}
                     </div>
                   </>}
                 </div>}

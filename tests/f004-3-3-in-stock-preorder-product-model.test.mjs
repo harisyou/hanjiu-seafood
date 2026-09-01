@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { formatPrice } from "../lib/catalog.ts";
 
 import {
   isPreorderCartItemValid,
+  shouldShowExcessPreorderNotice,
   supplyTypeForQuantity,
   variantSupplyType
 } from "../lib/supply-model.mjs";
@@ -13,6 +15,7 @@ const migration = readFileSync(new URL("../supabase/f004-3-3-in-stock-preorder-p
 const f0041Migration = readFileSync(new URL("../supabase/f004-1-checkout-idempotency.sql", import.meta.url), "utf8");
 const f00312Migration = readFileSync(new URL("../supabase/f003-12a-inventory-ledger-compat.sql", import.meta.url), "utf8");
 const inventoryPage = readFileSync(new URL("../app/admin/inventory/page.tsx", import.meta.url), "utf8");
+const supplyModelSource = readFileSync(new URL("../lib/supply-model.mjs", import.meta.url), "utf8");
 
 const stockOnly = { id: "stock", active: true, inventory: 3, preorder_enabled: false };
 const preorderWithStock = { id: "preorder-stock", active: true, inventory: 3, preorder_enabled: true };
@@ -96,14 +99,48 @@ test("only in-stock lines are eligible for cancellation restock", () => {
   assert.match(migration, /from public\.order_items where order_id = v_order\.id and supply_type = 'in_stock'/);
 });
 
-test("storefront explains the customer-facing availability model and updates cart lines dynamically", () => {
-  assert.match(page, /現貨剩 \$\{variant\.inventory\} 件｜可預訂/);
-  assert.match(page, /目前無現貨｜可預訂/);
-  assert.match(page, /超過現貨數量仍可預訂。/);
+test("storefront keeps supply details below a compact variant selector and updates cart lines dynamically", () => {
+  assert.match(page, /selectedVariant\.inventory > 0 \? `現貨剩 \$\{selectedVariant\.inventory\} 件｜可預訂` : "目前無現貨｜可預訂"/);
+  assert.match(page, /\{variant\.name\}｜\{formatPrice\(variant\.price\)\}<\/option>/);
+  assert.doesNotMatch(page, /\{variant\.name\}｜\{formatPrice\(variant\.price\)\}｜\{availability\}/);
+  assert.doesNotMatch(page, /目前現貨 \$\{selectedVariant\.inventory\} 件，此數量將以預訂方式處理。/);
+  assert.doesNotMatch(page, /超過現貨數量仍可預訂。/);
   assert.match(page, /const requestedQuantity = quantityAlreadyInCart \+ quantity/);
   assert.match(page, /const supplyType = supplyTypeForQuantity\(variant, requestedQuantity\)/);
   assert.match(page, /const supplyType = supplyTypeForQuantity\(variant, quantity\)/);
   assert.match(page, /\(!variant\.preorder_enabled && totalVariantQuantity >= purchaseLimit\)/);
+});
+
+test("mobile variant summary keeps the selected price readable beside supply status", () => {
+  const stylesheet = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.equal(formatPrice(499), "NT$499");
+  assert.equal(formatPrice(12999), "NT$12,999");
+  assert.match(stylesheet, /variantSelectionSummary\{grid-template-columns:minmax\(120px,\.85fr\) minmax\(0,1\.15fr\)/);
+  assert.match(stylesheet, /variantSelectedPrice strong\{color:#0f5a52;font-size:22px;line-height:1\.1;white-space:nowrap/);
+  assert.match(stylesheet, /variantSelectionSummary\{grid-template-columns:minmax\(112px,\.82fr\) minmax\(0,1\.18fr\);gap:8px/);
+  assert.match(stylesheet, /excessPreorderNotice\{max-width:100%/);
+  assert.match(stylesheet, /overflow-wrap:anywhere/);
+});
+
+test("storefront only shows the quantity-area preorder notice after positive inventory is exceeded", () => {
+  const preorderWithTenInStock = { id: "preorder-10", active: true, inventory: 10, preorder_enabled: true };
+  const preorderOnly = { id: "preorder-0", active: true, inventory: 0, preorder_enabled: true };
+  const stockOnlyWithTen = { id: "stock-10", active: true, inventory: 10, preorder_enabled: false };
+
+  assert.equal(shouldShowExcessPreorderNotice(preorderWithTenInStock, 1), false);
+  assert.equal(shouldShowExcessPreorderNotice(preorderWithTenInStock, 10), false);
+  assert.equal(shouldShowExcessPreorderNotice(preorderWithTenInStock, 11), true);
+  assert.equal(shouldShowExcessPreorderNotice(preorderWithTenInStock, 20), true);
+  assert.equal(shouldShowExcessPreorderNotice(preorderOnly, 1), false);
+  assert.equal(shouldShowExcessPreorderNotice(stockOnlyWithTen, 11), false);
+  assert.match(page, /<div className="variantQuantity">[\s\S]*showExcessPreorderNotice && <p className="excessPreorderNotice" role="status">超過現貨數量，將以預訂方式處理<\/p>/);
+  assert.match(page, /selectedVariant\.preorder_enabled \? null : remainingPurchasable/);
+  assert.match(page, /!selectedVariant\.preorder_enabled && selectedQuantity >= remainingPurchasable/);
+});
+
+test("zero-inventory preorder UI stays clear without duplicating the excess notice", () => {
+  assert.match(page, /selectedVariant\.inventory > 0 \? `現貨剩 \$\{selectedVariant\.inventory\} 件｜可預訂` : "目前無現貨｜可預訂"/);
+  assert.match(supplyModelSource, /variant\.inventory > 0 && quantity > variant\.inventory/);
 });
 
 test("admin inventory UI keeps preorder explicitly configurable without changing inventory semantics", () => {
