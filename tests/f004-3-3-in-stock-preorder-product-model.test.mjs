@@ -11,6 +11,7 @@ import {
 const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../supabase/f004-3-3-in-stock-preorder-product-model.sql", import.meta.url), "utf8");
 const f0041Migration = readFileSync(new URL("../supabase/f004-1-checkout-idempotency.sql", import.meta.url), "utf8");
+const f00312Migration = readFileSync(new URL("../supabase/f003-12a-inventory-ledger-compat.sql", import.meta.url), "utf8");
 const inventoryPage = readFileSync(new URL("../app/admin/inventory/page.tsx", import.meta.url), "utf8");
 
 const stockOnly = { id: "stock", active: true, inventory: 3, preorder_enabled: false };
@@ -108,4 +109,11 @@ test("storefront explains the customer-facing availability model and updates car
 test("admin inventory UI keeps preorder explicitly configurable without changing inventory semantics", () => {
   assert.match(inventoryPage, /preorder_enabled/);
   assert.match(inventoryPage, /接受預訂/);
+});
+
+test("legacy inventory-variant RPC default survives CREATE OR REPLACE without a destructive drop", () => {
+  const legacySignature = /admin_create_inventory_variant\(p_product_id uuid, p_name text, p_price integer, p_inventory integer, p_active boolean, p_sort_order integer default 100\)/;
+  assert.match(f00312Migration, legacySignature);
+  assert.match(migration, legacySignature);
+  assert.doesNotMatch(migration, /drop function.*admin_create_inventory_variant/i);
 });

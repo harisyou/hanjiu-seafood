@@ -313,7 +313,10 @@ begin
   return v_variant;
 end;
 $$;
-create or replace function public.admin_create_inventory_variant(p_product_id uuid, p_name text, p_price integer, p_inventory integer, p_active boolean, p_sort_order integer)
+-- F003-12 established the sixth parameter with DEFAULT 100. CREATE OR REPLACE
+-- cannot remove that default, and keeping it preserves existing five-argument
+-- admin callers without introducing a second ambiguous overload.
+create or replace function public.admin_create_inventory_variant(p_product_id uuid, p_name text, p_price integer, p_inventory integer, p_active boolean, p_sort_order integer default 100)
 returns public.product_variants language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if not public.is_hanjiu_admin() then raise exception 'admin_required'; end if;
