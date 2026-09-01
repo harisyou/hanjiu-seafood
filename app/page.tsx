@@ -7,7 +7,7 @@ import { filterProducts, normalizeProductSearch, sortActiveProductCategories } f
 import { isValidEmail, isValidTaiwanMobile, normalizeTaiwanMobile, taipeiCurrentTime, taipeiToday, validateTaipeiDateTime } from "@/lib/customer-validation";
 import { checkoutRequestFingerprint, checkoutRetryKey, clearCheckoutRetryKey } from "@/lib/checkout-idempotency";
 import { activeProductProcessingOptionConfigs, activeProductProcessingPresetConfigs, validProcessingSelection } from "@/lib/processing-availability";
-import { cartQuantityForVariant, remainingInStockPurchasable, supplyTypeForQuantity, variantSupplyType } from "@/lib/supply-model";
+import { cartQuantityForVariant, remainingInStockPurchasable, shouldShowExcessPreorderNotice, supplyTypeForQuantity, variantSupplyType } from "@/lib/supply-model";
 import FishRequestForm from "./fish-request-form";
 
 type SupplyType = "in_stock" | "preorder";
@@ -758,6 +758,7 @@ export default function HomePage() {
             const remainingPurchasable = selectedVariant ? getRemainingPurchasable(selectedVariant, cart) : 0;
             const quantityAlreadyInCart = selectedVariant ? cartQuantityForVariant(cart, selectedVariant.id) : 0;
             const selectedSupplyType = selectedVariant ? supplyTypeForQuantity(selectedVariant, quantityAlreadyInCart + selectedQuantity) : null;
+            const showExcessPreorderNotice = Boolean(selectedVariant && shouldShowExcessPreorderNotice(selectedVariant, quantityAlreadyInCart + selectedQuantity));
             const soldOut = purchasableVariants.length === 0;
             const staleSelectedVariant = Boolean(selectedVariants[product.id] && !selectedVariant);
             const hasMultipleVariantPrices = new Set(displayVariants.map((variant) => variant.price)).size > 1;
@@ -816,6 +817,7 @@ export default function HomePage() {
                         <strong className="quantityValue" key={`${selectedVariant.id}-${selectedQuantity}`}>{selectedQuantity}</strong>
                         <button type="button" aria-label="增加數量" disabled={cartLimitReached || (!selectedVariant.preorder_enabled && selectedQuantity >= remainingPurchasable)} onClick={() => setProductQuantity(product.id, selectedVariant.preorder_enabled ? null : remainingPurchasable, selectedQuantity + 1, true)}>＋</button>
                       </div>
+                      {showExcessPreorderNotice && <p className="excessPreorderNotice" role="status">超過現貨數量，將以預訂方式處理</p>}
                     </div>
                   </>}
                 </div>}
