@@ -5,6 +5,7 @@ import test from "node:test";
 const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const filters = readFileSync(new URL("../app/product-filters.css", import.meta.url), "utf8");
 const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+const categoryReadPolicy = readFileSync(new URL("../supabase/f004-3-1-storefront-product-categories-read-policy.sql", import.meta.url), "utf8");
 
 test("storefront keeps database-backed category filtering and combined stock filtering", () => {
   assert.match(page, /sortActiveProductCategories\(productCategories\)/);
@@ -38,6 +39,16 @@ test("a category-only query failure does not hide otherwise available products",
   assert.match(page, /if \(productResult\.error \|\| variantResult\.error\) setCatalogError/);
   assert.doesNotMatch(page, /productResult\.error \|\| variantResult\.error \|\| categoryResult\.error\) setCatalogError/);
   assert.match(page, /重新載入類別/);
+});
+
+test("anonymous category reads never evaluate the admin authorization function", () => {
+  const publicPolicy = categoryReadPolicy.match(/create policy "public read active product categories"[\s\S]*?using \(active\);/i)?.[0] || "";
+  assert.match(categoryReadPolicy, /^begin;/mi);
+  assert.match(categoryReadPolicy, /drop policy if exists "public read active product categories"/i);
+  assert.match(publicPolicy, /to anon, authenticated[\s\S]*?using \(active\)/i);
+  assert.doesNotMatch(publicPolicy, /is_hanjiu_admin/i);
+  assert.match(categoryReadPolicy, /create policy "admin read all product categories"[\s\S]*?to authenticated[\s\S]*?using \(\(select public\.is_hanjiu_admin\(\)\)\)/i);
+  assert.match(categoryReadPolicy, /commit;/i);
 });
 
 test("product cards communicate availability and preserve the existing variant selection controls", () => {
