@@ -245,3 +245,30 @@ nav{display:flex;justify-content:space-between;align-items:center}nav div{displa
 /* F004-2.1 product category management */
 .categoryManagementGrid{grid-template-columns:minmax(280px,360px) minmax(0,1fr)}.categoryEditor{align-self:start}.categoryListHint{margin:0 0 18px;color:#61736f;line-height:1.55}.categoryTable{display:grid;border-top:1px solid #e0e8e5}.categoryTableHeader,.categoryTableRow{display:grid;grid-template-columns:minmax(160px,1.2fr) 110px 92px minmax(130px,.8fr);gap:12px;align-items:center;padding:14px 4px;border-bottom:1px solid #e0e8e5}.categoryTableHeader{color:#61736f;font-size:13px;font-weight:800}.categoryTableRow strong{display:grid;gap:4px}.categoryTableRow strong small{color:#61736f;font-size:12px;font-weight:500}.categoryActive,.categoryInactive{display:inline-flex;width:max-content;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:800}.categoryActive{background:#e5f1ec;color:#276654}.categoryInactive{background:#edf0ef;color:#66736f}.categoryActions{display:flex;gap:8px}.categoryActions button{width:auto;min-height:40px;padding:8px 11px;border:1px solid #bfd4cf;border-radius:9px;background:#fff;color:#0f5a52;font-weight:800}.categoryActions .categoryDeleteButton{border-color:#dbc2bd;color:#8b443d}.categoryActions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:760px){.categoryManagementGrid{grid-template-columns:1fr}.categoryTableHeader{display:none}.categoryTableRow{grid-template-columns:1fr auto;gap:10px;padding:16px 0}.categoryTableRow>span:nth-child(2),.categoryTableRow>span:nth-child(3){font-size:13px;color:#61736f}.categoryActions{grid-column:1/-1}.categoryActions button{flex:1}}
 .categoryAssignmentHelp{display:block;margin-top:6px;color:#61736f;font-size:12px;font-weight:500;line-height:1.45}
+
+/* F004-3.1 storefront product browsing */
+.srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.productBrowsingSection{overflow:hidden}
+.productBrowsingHeading{margin-bottom:24px}
+.storefrontProductGrid{align-items:stretch;grid-auto-rows:1fr}
+.storefrontProductCard{display:flex;min-width:0;flex-direction:column;box-shadow:0 10px 28px rgba(16,42,46,.05);transition:transform 160ms ease,box-shadow 160ms ease,border-color 160ms ease}
+.storefrontProductCard:hover{transform:translateY(-2px);border-color:#b9d3cc;box-shadow:0 16px 34px rgba(16,42,46,.1)}
+.storefrontProductCard .photo{height:auto;aspect-ratio:4/3;overflow:hidden;background:linear-gradient(135deg,#e8f2ef,#dcebe6)}
+.storefrontProductCard .photo img{transition:transform 260ms ease}
+.storefrontProductCard:hover .photo img{transform:scale(1.025)}
+.productCardBadges{position:absolute;inset:14px 14px auto;display:flex;align-items:center;gap:8px;pointer-events:none}
+.storefrontProductCard .photo b{position:static;display:inline-flex;min-height:30px;align-items:center;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:900;box-shadow:0 4px 12px rgba(15,48,43,.12)}
+.storefrontProductCard .photo b{margin:0;background:rgba(255,255,255,.93);color:#24584d}
+.storefrontProductCard .body{display:flex;min-width:0;flex:1;flex-direction:column;padding:22px}
+.productCardIntro small{display:block;color:#52716b;font-size:12px;font-weight:800;letter-spacing:.02em}
+.productCardIntro span{display:block;margin-top:3px;color:#52716b;font-size:12px;font-weight:700}
+.storefrontProductCard .body h3{margin:5px 0 0;color:#153e37;line-height:1.18}
+.productDescription{display:-webkit-box;min-height:44px;margin:12px 0 0;color:#465f5a;line-height:1.55;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.productCooking{min-height:22px;margin:8px 0 0;color:#6a7d78;font-size:13px;line-height:1.55}
+.storefrontProductCard .variantSelector{margin:18px 0 0;padding-top:18px;border-top:1px solid #e3ece9}
+.storefrontProductCard .variantSelector>label{color:#244e46;font-size:14px}
+.storefrontProductCard .addToCartButton{margin-top:auto}
+.storefrontProductCard.isSoldOut .photo img{filter:saturate(.7)}
+.storefrontProductCard.isSoldOut .addToCartButton{background:#8a9995;color:#fff}
+@media(max-width:700px){.productBrowsingHeading{margin-bottom:20px}.storefrontProductCard:hover{transform:none}.storefrontProductCard .photo{aspect-ratio:16/10}.storefrontProductCard .body{padding:18px}.productCardBadges{inset:12px}.storefrontProductCard .photo img{transition:none}.productDescription{min-height:0}.storefrontProductCard .variantSelector{margin-top:16px;padding-top:16px}}
+@media(prefers-reduced-motion:reduce){.storefrontProductCard,.storefrontProductCard .photo img{transition:none}.storefrontProductCard:hover{transform:none}}

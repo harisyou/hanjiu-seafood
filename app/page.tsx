@@ -106,6 +106,10 @@ export default function HomePage() {
   const [productFeedback, setProductFeedback] = useState<Record<string, string>>({});
   const [cart, setCart] = useState<CartItem[]>([]);
   const [catalogReady, setCatalogReady] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState("");
+  const [categoryLoadError, setCategoryLoadError] = useState("");
+  const [catalogRefresh, setCatalogRefresh] = useState(0);
   const [cartRestored, setCartRestored] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [cartToast, setCartToast] = useState("");
@@ -156,6 +160,10 @@ export default function HomePage() {
 
   useEffect(() => {
     async function loadCatalog() {
+      setCatalogLoading(true);
+      setCatalogError("");
+      setCategoryLoadError("");
+      try {
       const [productResult, variantResult, categoryResult, optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult] = await Promise.all([
         supabase.from("products").select("*").neq("status", "hidden").order("sort_order"),
         supabase.from("product_variants").select("*").eq("active", true).order("sort_order"),
@@ -170,8 +178,12 @@ export default function HomePage() {
       else setProducts((productResult.data || []) as Product[]);
       if (variantResult.error) setNotice(`規格載入失敗：${variantResult.error.message}`);
       else setVariants((variantResult.data || []) as ProductVariant[]);
-      if (categoryResult.error) setNotice("商品類別暫時無法載入，請稍後再試。");
+      if (categoryResult.error) {
+        console.error("Storefront product category query failed", categoryResult.error);
+        setCategoryLoadError("商品類別暫時無法載入，已先顯示全部商品。");
+      }
       else setProductCategories((categoryResult.data || []) as ProductCategoryRecord[]);
+      if (productResult.error || variantResult.error) setCatalogError("商品瀏覽資料暫時無法載入，請稍後再試。");
       const processingError = [optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult].find((result) => result.error)?.error;
       if (processingError) setNotice("魚貨處理方式載入失敗，請重新整理頁面。");
       else {
@@ -182,9 +194,17 @@ export default function HomePage() {
         setProductProcessingPresets((productPresetResult.data || []) as ProductProcessingPreset[]);
       }
       setCatalogReady(!productResult.error && !variantResult.error && !processingError);
+      } catch {
+        setCatalogError("商品瀏覽資料暫時無法載入，請稍後再試。");
+        setCategoryLoadError("");
+        setNotice("商品載入失敗，請重新整理頁面。");
+        setCatalogReady(false);
+      } finally {
+        setCatalogLoading(false);
+      }
     }
     loadCatalog();
-  }, [supabase]);
+  }, [catalogRefresh, supabase]);
 
   useEffect(() => {
     if (selectedProductCategory !== "all" && !productCategories.some((category) => category.id === selectedProductCategory && category.active)) setSelectedProductCategory("all");
@@ -650,6 +670,11 @@ export default function HomePage() {
     [productCategories]
   );
   const filtersActive = Boolean(normalizeProductSearch(productSearch) || selectedProductCategory !== "all" || inStockOnly);
+  const clearProductFilters = () => {
+    setProductSearch("");
+    setSelectedProductCategory("all");
+    setInStockOnly(false);
+  };
   const shippingThreshold = 2500;
   const shippingRemaining = Math.max(0, shippingThreshold - total);
   const shippingProgress = Math.min(100, (total / shippingThreshold) * 100);
@@ -694,22 +719,30 @@ export default function HomePage() {
     <img src="/hero-desktop.png" alt="南方澳船釣海魚" />
   </picture>
 </header>
-      <section className="content">
-        <div className="heading"><div><small>TODAY&apos;S CATCH</small><h2>今日海鮮</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
+      <section className="content productBrowsingSection">
+        <div className="heading productBrowsingHeading"><div><small>TODAY&apos;S CATCH</small><h2>今日海鮮</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
         <section className="productFilters" aria-label="商品搜尋與篩選">
           <label className="productSearchField">
+            <span aria-hidden="true">⌕</span>
             <input type="search" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="搜尋商品名稱，例如：馬頭" aria-label="商品搜尋" aria-controls="product-grid" />
+            {productSearch && <button type="button" className="productSearchClear" aria-label="清除商品搜尋" onClick={() => setProductSearch("")}>×</button>}
           </label>
-          <div className="productCategoryChips" role="group" aria-label="商品分類">
-            {storefrontCategories.map((category) => <button type="button" key={category.id} className={selectedProductCategory === category.id ? "isActive" : ""} aria-pressed={selectedProductCategory === category.id} onClick={() => setSelectedProductCategory(category.id)}>{category.name}</button>)}
+          <div className="productFilterControls">
+            <div className="productCategoryChips" role="group" aria-label="商品分類">
+              {storefrontCategories.map((category) => <button type="button" key={category.id} className={selectedProductCategory === category.id ? "isActive" : ""} aria-pressed={selectedProductCategory === category.id} onClick={() => setSelectedProductCategory(category.id)}>{category.name}</button>)}
+            </div>
+            <label className="stockOnlyToggle">
+              <input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} />
+              <span>只看有貨</span>
+            </label>
           </div>
-          <label className="stockOnlyToggle">
-            <input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} />
-            <span>只看有貨</span>
-          </label>
-          <button type="button" className="productFilterReset" disabled={!filtersActive} onClick={() => { setProductSearch(""); setSelectedProductCategory("all"); setInStockOnly(false); }}>清除篩選</button>
+          {filtersActive && <button type="button" className="productFilterReset" onClick={clearProductFilters}>清除篩選</button>}
         </section>
-        {filteredProducts.length === 0 ? <div className="productFilterEmpty" role="status" aria-live="polite"><p>目前沒有符合條件的商品</p><button type="button" className="productFilterReset" onClick={() => { setProductSearch(""); setSelectedProductCategory("all"); setInStockOnly(false); }}>清除篩選</button></div> : <div className="grid" id="product-grid">
+        {categoryLoadError && <div className="productCategoryLoadNotice" role="status" aria-live="polite"><span>{categoryLoadError}</span><button type="button" onClick={() => setCatalogRefresh((current) => current + 1)}>重新載入類別</button></div>}
+        <div className="productBrowseResult" aria-live="polite" aria-atomic="true">
+          {!catalogLoading && !catalogError && <span>{filteredProducts.length} 項商品</span>}
+        </div>
+        {catalogLoading ? <div className="productBrowseLoading" role="status" aria-live="polite"><span className="srOnly">商品載入中</span>{Array.from({ length: 3 }).map((_, index) => <div className="productBrowseSkeleton" key={index} aria-hidden="true"><span /><b /><i /></div>)}</div> : catalogError ? <div className="productBrowseError" role="alert"><strong>暫時無法載入今日海鮮</strong><p>{catalogError}</p><button type="button" onClick={() => setCatalogRefresh((current) => current + 1)}>重新載入</button></div> : filteredProducts.length === 0 ? <div className="productFilterEmpty" role="status" aria-live="polite"><strong>{filtersActive ? "目前沒有符合條件的商品" : "今天的魚貨正在準備中"}</strong><p>{filtersActive ? "試試其他關鍵字或分類，看看更多今日魚貨。" : "稍後再回來看看，或先告訴韓九您想找什麼。"}</p>{filtersActive ? <button type="button" className="productFilterReset" onClick={clearProductFilters}>清除篩選</button> : <a className="productBrowseRequestLink" href="#fish-request">告訴韓九我想找什麼</a>}</div> : <div className="grid storefrontProductGrid" id="product-grid">
           {filteredProducts.map((product) => {
             const productVariants = variants.filter((variant) => variant.product_id === product.id);
             const displayVariants = productVariants.filter((variant) => variant.active);
@@ -735,9 +768,9 @@ export default function HomePage() {
                   : cartActionStatus === "success"
                     ? "✓ 已加入購物車"
                     : "加入購物車";
-            return <article className="card" key={product.id}>
-              <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span>🦀</span>}{product.featured && <b>本日精選</b>}</div>
-              <div className="body"><small>{soldOut ? "已售完" : "今日供應"}</small><h3>{product.name}</h3><p>{product.description}</p><p>料理建議：{product.cooking || "歡迎詢問"}</p>
+            return <article className={`card storefrontProductCard ${soldOut ? "isSoldOut" : "isAvailable"}`} key={product.id}>
+              <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span aria-label="尚無商品圖片" role="img">🐟</span>}{product.featured && <div className="productCardBadges"><b>本日精選</b></div>}</div>
+              <div className="body"><div className="productCardIntro"><div><small>{soldOut ? "已售完" : "今日供應"}</small>{!soldOut && <span>{purchasableVariants.length} 個可購買規格</span>}<h3>{product.name}</h3></div></div><p className="productDescription">{product.description || "今日新鮮上架，規格與價格請見下方。"}</p><p className="productCooking">料理建議：{product.cooking || "歡迎詢問"}</p>
                 {displayVariants.length > 0 && <div className="variantSelector">
                   <label htmlFor={`variant-${product.id}`}>選擇規格</label>
                   <select id={`variant-${product.id}`} value={selectedVariants[product.id] || ""} onChange={(event) => selectVariant(product.id, event.target.value)}>
