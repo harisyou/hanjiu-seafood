@@ -295,3 +295,10 @@ nav{display:flex;justify-content:space-between;align-items:center}nav div{displa
 .storefrontProductCard .variantQuantity button{width:48px;height:48px;border-radius:12px}
 .storefrontProductCard .addToCartButton{min-height:52px;margin-top:20px;border-radius:12px;font-size:16px}
 @media(max-width:700px){.storefrontProductCard .variantSelector{gap:8px}.storefrontProductCard .variantSelector select{min-height:54px}.storefrontProductCard .variantSelectionSummary{gap:8px}.storefrontProductCard .variantSelectionSummary>div{padding:11px 12px}.storefrontProductCard .variantSelectionSummary .variantSelectedPrice strong{font-size:21px}.storefrontProductCard .variantQuantity button{width:48px;height:48px}.storefrontProductCard .addToCartButton{min-height:54px;margin-top:18px}}
+
+/* F004-3.3 supply type snapshots: status is distinct from mutable inventory. */
+.cartSupplyBadge{display:inline-flex;align-items:center;width:max-content;margin:0 0 8px;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:800;line-height:1.2}
+.cartSupplyBadge.isInStock{background:#edf8f2;color:#237151}
+.cartSupplyBadge.isPreorder{background:#fff5ea;color:#9a5d22}
+.preorderCartNotice{display:block;max-width:280px;margin:-2px 0 9px;color:#726157;font-size:12px;line-height:1.5}
+.checkoutPreorderNotice{margin:0 0 12px;padding:11px 12px;border:1px solid #eed8bd;border-radius:12px;background:#fffaf4;color:#76532e;font-size:14px;font-weight:700;line-height:1.55}

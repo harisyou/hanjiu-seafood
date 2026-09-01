@@ -60,7 +60,8 @@ test("all restored variants and the cancelled status share one RPC transaction",
 
 test("admin detail uses the cancellation RPC only after explicit confirmation", () => {
   assert.match(detailPage, /supabase\.rpc\("admin_cancel_order", \{ p_order_id: order\.id \}\)/);
-  assert.match(detailPage, /確認取消並補回庫存/);
+  assert.match(detailPage, /確認取消訂單/);
+  assert.match(detailPage, /預訂品項不會補庫存/);
   assert.match(detailPage, /訂單已取消，庫存已補回，並已寫入庫存異動紀錄。/);
   assert.match(detailPage, /const canCancel = !isDraft && !isCancelled && order\.payment_status !== "paid"/);
   assert.match(detailPage, /if \(payload\.status === "cancelled"\) return/);

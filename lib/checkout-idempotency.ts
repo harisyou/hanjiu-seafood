@@ -1,6 +1,7 @@
 export type CheckoutFingerprintItem = {
   variant_id: string;
   quantity: number;
+  supply_type?: "in_stock" | "preorder";
   processing_preset_id?: string | null;
   processing_option_ids?: string[] | null;
   processing_note?: string | null;
@@ -41,6 +42,7 @@ export function canonicalizeCheckoutRequest(input: CheckoutFingerprintInput) {
       .map((item) => ({
         variant_id: item.variant_id.toLowerCase(),
         quantity: Number(item.quantity),
+        supply_type: item.supply_type || "in_stock",
         processing_preset_id: normalizedText(item.processing_preset_id),
         processing_option_ids: [...new Set(item.processing_option_ids || [])].sort(),
         processing_note: normalizedText(item.processing_note) ? postgresLeft(normalizedText(item.processing_note)!, 500) : null

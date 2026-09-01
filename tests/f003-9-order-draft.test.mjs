@@ -78,7 +78,7 @@ test("workspace sends only IDs and quantity while explaining draft side effects"
 test("sold-out variants remain visible to admins but are disabled for draft creation", () => {
   assert.equal(isDraftVariantAvailable(variant({ inventory: 0 })), false);
   assert.match(workspace, /disabled=\{!isDraftVariantAvailable\(variant\)\}/);
-  assert.match(workspace, /variant\.inventory > 0 \? "剩餘 " \+ variant\.inventory \+ " 尾" : "已售完"/);
+  assert.match(workspace, /variant\.inventory > 0 \? "現貨｜剩 " \+ variant\.inventory \+ " 件" : "已售完"/);
 });
 
 test("formal today-order summary excludes drafts", () => {

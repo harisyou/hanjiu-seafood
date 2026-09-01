@@ -11,26 +11,26 @@ test("variant selector makes multi-price choice and the selected specification e
   assert.match(page, /className="variantDetails variantSelectionSummary"/);
   assert.match(page, /已選規格/);
   assert.match(page, /className="variantSelectedPrice"/);
-  assert.match(page, /可購買狀態/);
+  assert.match(page, /供應狀態/);
 });
 
 test("unselected, stale, inactive, and sold-out variants cannot be added", () => {
   assert.match(page, /const staleSelectedVariant = Boolean\(selectedVariants\[product\.id\] && !selectedVariant\)/);
   assert.match(page, /此規格目前無法購買，請重新選擇。/);
   assert.match(page, /staleSelectedVariant[\s\S]*?"請重新選擇規格"/);
-  assert.match(page, /const unavailable = product\.status !== "available" \|\| variant\.inventory <= 0/);
+  assert.match(page, /const unavailable = product\.status !== "available" \|\| !supplyType/);
   assert.match(page, /disabled=\{unavailable\}/);
   assert.match(page, /disabled=\{soldOut \|\| !selectedVariant \|\| cartLimitReached/);
   assert.match(page, /\? "已售完"/);
 });
 
 test("the existing cart path still separates variants and immediately reports the successful add", () => {
-  assert.match(page, /const cartKey = processingSignature\(variant\.id, processingSelection\)/);
+  assert.match(page, /const cartKey = processingSignature\(variant\.id, supplyType, processingSelection\)/);
   assert.match(page, /item\.cart_key === cartKey \? \{ \.\.\.item, quantity: item\.quantity \+ quantity \}/);
   assert.match(page, /variant_id: variant\.id/);
   assert.match(page, /setCartToast\(successMessage\)/);
   assert.match(page, /setCartBounceKey\(\(current\) => current \+ 1\)/);
-  assert.match(page, /購物車內共 \$\{quantityAlreadyInCart \+ quantity\} 隻/);
+  assert.match(page, /supply_type: supplyType/);
 });
 
 test("variant controls remain mobile touch-sized, contained, and motion-safe", () => {
