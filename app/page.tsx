@@ -108,6 +108,7 @@ export default function HomePage() {
   const [catalogReady, setCatalogReady] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState("");
+  const [categoryLoadError, setCategoryLoadError] = useState("");
   const [catalogRefresh, setCatalogRefresh] = useState(0);
   const [cartRestored, setCartRestored] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -161,6 +162,7 @@ export default function HomePage() {
     async function loadCatalog() {
       setCatalogLoading(true);
       setCatalogError("");
+      setCategoryLoadError("");
       try {
       const [productResult, variantResult, categoryResult, optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult] = await Promise.all([
         supabase.from("products").select("*").neq("status", "hidden").order("sort_order"),
@@ -176,9 +178,12 @@ export default function HomePage() {
       else setProducts((productResult.data || []) as Product[]);
       if (variantResult.error) setNotice(`規格載入失敗：${variantResult.error.message}`);
       else setVariants((variantResult.data || []) as ProductVariant[]);
-      if (categoryResult.error) setNotice("商品類別暫時無法載入，請稍後再試。");
+      if (categoryResult.error) {
+        console.error("Storefront product category query failed", categoryResult.error);
+        setCategoryLoadError("商品類別暫時無法載入，已先顯示全部商品。");
+      }
       else setProductCategories((categoryResult.data || []) as ProductCategoryRecord[]);
-      if (productResult.error || variantResult.error || categoryResult.error) setCatalogError("商品瀏覽資料暫時無法載入，請稍後再試。");
+      if (productResult.error || variantResult.error) setCatalogError("商品瀏覽資料暫時無法載入，請稍後再試。");
       const processingError = [optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult].find((result) => result.error)?.error;
       if (processingError) setNotice("魚貨處理方式載入失敗，請重新整理頁面。");
       else {
@@ -191,6 +196,7 @@ export default function HomePage() {
       setCatalogReady(!productResult.error && !variantResult.error && !processingError);
       } catch {
         setCatalogError("商品瀏覽資料暫時無法載入，請稍後再試。");
+        setCategoryLoadError("");
         setNotice("商品載入失敗，請重新整理頁面。");
         setCatalogReady(false);
       } finally {
@@ -732,6 +738,7 @@ export default function HomePage() {
           </div>
           {filtersActive && <button type="button" className="productFilterReset" onClick={clearProductFilters}>清除篩選</button>}
         </section>
+        {categoryLoadError && <div className="productCategoryLoadNotice" role="status" aria-live="polite"><span>{categoryLoadError}</span><button type="button" onClick={() => setCatalogRefresh((current) => current + 1)}>重新載入類別</button></div>}
         <div className="productBrowseResult" aria-live="polite" aria-atomic="true">
           {!catalogLoading && !catalogError && <span>{filteredProducts.length} 項商品</span>}
         </div>

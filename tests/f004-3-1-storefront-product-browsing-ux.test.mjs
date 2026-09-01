@@ -32,6 +32,14 @@ test("browse area has loading, retryable error, and filter-aware empty states", 
   assert.match(page, /今天的魚貨正在準備中/);
 });
 
+test("a category-only query failure does not hide otherwise available products", () => {
+  assert.match(page, /const \[categoryLoadError, setCategoryLoadError\] = useState\(""\)/);
+  assert.match(page, /if \(categoryResult\.error\) \{[\s\S]*?setCategoryLoadError\("商品類別暫時無法載入，已先顯示全部商品。"\)/);
+  assert.match(page, /if \(productResult\.error \|\| variantResult\.error\) setCatalogError/);
+  assert.doesNotMatch(page, /productResult\.error \|\| variantResult\.error \|\| categoryResult\.error\) setCatalogError/);
+  assert.match(page, /重新載入類別/);
+});
+
 test("product cards communicate availability and preserve the existing variant selection controls", () => {
   assert.match(page, /storefrontProductCard/);
   assert.match(page, /productAvailability isSoldOut/);
