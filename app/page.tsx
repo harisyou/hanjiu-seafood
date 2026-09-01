@@ -791,8 +791,7 @@ export default function HomePage() {
                     {displayVariants.map((variant) => {
                       const supplyType = variantSupplyType(variant);
                       const unavailable = product.status !== "available" || !supplyType;
-                      const availability = variant.preorder_enabled ? variant.inventory > 0 ? `現貨剩 ${variant.inventory} 件｜可預訂` : "目前無現貨｜可預訂" : supplyType === "in_stock" ? `現貨剩 ${variant.inventory} 件` : "已售完";
-                      return <option value={variant.id} disabled={unavailable} key={variant.id}>{variant.name}｜{formatPrice(variant.price)}｜{availability}</option>;
+                      return <option value={variant.id} disabled={unavailable} key={variant.id}>{variant.name}｜{formatPrice(variant.price)}</option>;
                     })}
                   </select>
                   <p className="weightBasisNotice">重量皆以魚貨處理前秤重為準，去鱗、去鰓、去內臟等處理後，實際收到重量會減少。</p>
@@ -801,7 +800,7 @@ export default function HomePage() {
                     <div className="variantDetails variantSelectionSummary" aria-live="polite" aria-atomic="true">
                       <div className="variantSelectedName"><span>已選規格</span><strong>{selectedVariant.name}</strong></div>
                       <div className="variantSelectedPrice"><span>價格</span><strong>{formatPrice(selectedVariant.price)}</strong></div>
-                      <div className={`variantPurchaseStatus ${cartLimitReached ? "isUnavailable" : ""}`}><span>供應狀態</span><strong>{selectedVariant.preorder_enabled ? selectedVariant.inventory > 0 ? `現貨剩 ${selectedVariant.inventory} 件｜可預訂` : "目前無現貨｜可預訂" : cartLimitReached ? "已達本次限購上限" : `現貨剩 ${remainingPurchasable} 件`}</strong>{selectedVariant.preorder_enabled ? <small>{selectedSupplyType === "preorder" ? `目前現貨 ${selectedVariant.inventory} 件，此數量將以預訂方式處理。` : "超過現貨數量仍可預訂。"}</small> : !cartLimitReached && <small>本次可購買 {remainingPurchasable} 件</small>}{remainingPurchasable === 1 && !selectedVariant.preorder_enabled && selectedSupplyType === "in_stock" && !cartLimitReached && <small className="rareNotice">🔥 最後一件</small>}</div>
+                      <div className={`variantPurchaseStatus ${cartLimitReached ? "isUnavailable" : ""}`}><span>供應狀態</span><strong>{selectedVariant.preorder_enabled ? selectedVariant.inventory > 0 ? `現貨剩 ${selectedVariant.inventory} 件｜可預訂` : "目前無現貨｜可預訂" : cartLimitReached ? "已達本次限購上限" : `現貨剩 ${remainingPurchasable} 件`}</strong>{!selectedVariant.preorder_enabled && !cartLimitReached && <small>本次可購買 {remainingPurchasable} 件</small>}{remainingPurchasable === 1 && !selectedVariant.preorder_enabled && selectedSupplyType === "in_stock" && !cartLimitReached && <small className="rareNotice">🔥 最後一件</small>}</div>
                     </div>
                     {product.processing_enabled && <section className="productProcessing" aria-labelledby={`processing-${product.id}`}>
                       <h4 id={`processing-${product.id}`}>🐟 魚貨處理方式</h4>

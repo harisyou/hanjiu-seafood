@@ -25,7 +25,8 @@ test("zero-inventory variant remains visible and only non-preorder variants are 
   assert.match(storefront, /variantSupplyType\(variant\)/);
   assert.match(supplyModel, /return variant\.preorder_enabled \? "preorder" : null/);
   assert.match(storefront, /<option value=\{variant\.id\} disabled=\{unavailable\}/);
-  assert.match(storefront, /variant\.preorder_enabled \? variant\.inventory > 0 \? `現貨剩 \$\{variant\.inventory\} 件｜可預訂` : "目前無現貨｜可預訂"/);
+  assert.match(storefront, /\{variant\.name\}｜\{formatPrice\(variant\.price\)\}<\/option>/);
+  assert.match(storefront, /selectedVariant\.preorder_enabled \? selectedVariant\.inventory > 0 \? `現貨剩 \$\{selectedVariant\.inventory\} 件｜可預訂` : "目前無現貨｜可預訂"/);
   assert.match(storefront, /const soldOut = purchasableVariants\.length === 0/);
   assert.match(storefront, /<small>\{soldOut \? "已售完" : "今日供應"\}<\/small>/);
 });
