@@ -9,6 +9,7 @@ test('Phase 1 migration, RLS, atomic gallery writes and stale-editor protection'
  try {
  await db.exec(`create role anon; create role authenticated; create schema storage;
  create table storage.objects(id uuid, bucket_id text, name text);
+ create policy "Allow authenticated delete" on storage.objects for delete to authenticated using(bucket_id='product-images');
  create function public.is_hanjiu_admin() returns boolean language sql as $$ select coalesce(current_setting('test.admin',true),'false')='true' $$;
  create table public.product_categories(id uuid primary key, active boolean);
  create table public.fish_catalog(id uuid primary key, active boolean);
@@ -21,6 +22,10 @@ test('Phase 1 migration, RLS, atomic gallery writes and stale-editor protection'
  insert into product_categories values('20000000-0000-4000-8000-000000000001',true);
  insert into products(id,name,category_id,image_url,status,featured,sort_order) values('10000000-0000-4000-8000-000000000001','魚','20000000-0000-4000-8000-000000000001','https://legacy/image.jpg','available',false,100);`);
  await db.exec(readFileSync(new URL('../supabase/f005-1-product-catalog.sql',import.meta.url),'utf8'));
+ // Applying F005-1 alone leaves the Production-reported differently named policy.
+ assert.equal((await db.query("select * from pg_policies where schemaname='storage' and policyname='Allow authenticated delete'")).rows.length,1);
+ await db.exec(readFileSync(new URL('../supabase/f005-1a-product-image-delete-lockdown.sql',import.meta.url),'utf8'));
+ // All gallery save/backfill/primary/RLS assertions below now run after both migrations.
  const rows=async(sql,params)=> (await db.query(sql,params)).rows;
  let product=(await rows('select *,updated_at::text as updated_at from products'))[0];
  let images=await rows('select * from product_images');

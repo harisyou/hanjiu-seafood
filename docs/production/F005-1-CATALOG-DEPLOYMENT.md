@@ -13,6 +13,41 @@ permission to run SQL automatically. Prefer a separate staging Supabase project.
 
 ## Execution order
 
+### Current Production: F005-1 already applied; apply F005-1a only
+
+Production verification reported `storage.objects` policy `Allow authenticated
+delete`, DELETE to authenticated, USING `(bucket_id = 'product-images'::text)`.
+F005-1 only removed the differently named `admin delete product images` policy.
+The remaining permissive policy independently grants deletion; removing another
+policy does not revoke it. The prior verification listed policies for review but
+did not raise an error, and the original minimal DB fixture omitted this policy.
+This was an implementation/test coverage gap, not evidence Production was secure.
+
+1. Do **not** rerun or edit the already-applied `f005-1-product-catalog.sql`.
+2. Owner manually executes **`supabase/f005-1a-product-image-delete-lockdown.sql`**.
+   It removes only the reported DELETE policy after checking its command, roles
+   and predicate. If the definition differs, it raises an error and rolls back;
+   review the actual policy rather than broadening the fix blindly. If absent,
+   it is a safe no-op. No object bytes or metadata rows are deleted.
+3. Run the updated **`supabase/f005-1-product-catalog-verify.sql`**. Its initial
+   read-only assertion must now succeed; before the fix it raises
+   `unsafe_product_image_delete_policy`. The two known delete policies must be
+   absent. Review any other DELETE/ALL policies separately, including PUBLIC and
+   inherited-role grants; the assertion does not analyze arbitrary predicates.
+4. In isolated staging, verify ordinary authenticated and admin-role browser
+   clients cannot delete product-images objects. PostgreSQL RLS can return zero
+   affected rows rather than an error: confirm the object still exists. Verify
+   admin upload, gallery save/primary/reorder/removal and public image reads still
+   work. Metadata removal intentionally leaves Storage bytes untouched.
+5. Compare other Storage policy definitions before/after: unchanged. No checkout,
+   order/payment/ledger/processing/idempotency migration is needed.
+
+The fix changes only SQL permissions; it does not require waiting for a frontend
+deployment. Never restore the unsafe policy as a rollback. If legitimate cleanup
+is later required, design a separately reviewed privileged cleanup process.
+
+### Fresh environment only (not the already-migrated Production database)
+
 1. Review `docs/production/MIGRATION_MANIFEST.md`. Confirm the existing F004-1,
    F004-2.1 (including any previously approved correction), F004-2.2, F004-3.1 and
    F004-3.3 schema/permissions. Do not rerun historical files blindly.
@@ -22,13 +57,15 @@ permission to run SQL automatically. Prefer a separate staging Supabase project.
    Inventory/checkout activity can change counts; compare during an agreed quiet
    verification window, not by disabling safety triggers.
 3. Pause admin catalog/image editing and close old editor tabs. This migration
-   revokes the old catalog create/update RPC grants and browser Storage deletion.
+   revokes the old catalog create/update RPC grants and the repo-known Storage
+   delete policy; F005-1a handles the additional Production policy.
    Existing storefront checkout remains unchanged. Keep this maintenance window
    short and deploy the new admin immediately after verification.
 4. Manually run **`supabase/f005-1-product-catalog.sql` once**. It wraps all changes
    in a transaction. It is not a rerunnable seed. If a table/trigger already exists,
    stop and reconcile applied state; do not delete it to force a rerun.
-5. Manually run **`supabase/f005-1-product-catalog-verify.sql`**. Expected results
+5. Run **`supabase/f005-1a-product-image-delete-lockdown.sql`**, then manually run
+   **`supabase/f005-1-product-catalog-verify.sql`**. Expected results
    are annotated in the file. Verify Storage has no additional DELETE/ALL policy
    permitting browser deletion of referenced product-images objects.
 6. Deploy this application version with its normal Supabase URL/anon key. Confirm

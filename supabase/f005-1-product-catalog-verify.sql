@@ -1,4 +1,19 @@
--- READ ONLY. User runs manually in Supabase SQL Editor AFTER f005-1 migration.
+-- READ ONLY. User runs manually AFTER F005-1 AND F005-1a.
+-- BEGIN STORAGE DELETE ASSERTION
+-- Fail, rather than merely list the reported unsafe policy. No data is mutated.
+do $$
+begin
+  if exists (
+    select 1 from pg_policies
+    where schemaname = 'storage' and tablename = 'objects'
+      and policyname in ('Allow authenticated delete', 'admin delete product images')
+  ) then
+    raise exception 'unsafe_product_image_delete_policy: browser deletion policy remains; apply/review F005-1a';
+  end if;
+end;
+$$;
+-- END STORAGE DELETE ASSERTION
+
 -- Expected: three product columns with correct types, image/FAQ RLS true.
 select table_name,column_name,data_type,is_nullable from information_schema.columns
 where table_schema='public' and ((table_name='products' and column_name in ('texture_description','storage_instructions','updated_at'))
@@ -47,7 +62,10 @@ select has_function_privilege('authenticated','public.admin_update_catalog_produ
 select policyname,cmd,roles,qual,with_check from pg_policies
 where (schemaname='public' and tablename in ('product_images','product_faqs'))
    or (schemaname='storage' and tablename='objects' and cmd in ('DELETE','ALL'));
--- Review Storage policy result: no policy should permit browser deletion of product-images.
+-- Also review all remaining DELETE/ALL policies, including policies granted to
+-- PUBLIC/inherited roles: none may permit browser deletion of product-images.
+-- The assertion catches the known policy names; it is not a general SQL predicate
+-- analyzer and does not prove arbitrary differently named policies are safe.
 
 -- Save the equivalent output BEFORE migration and compare AFTER, while admin writes
 -- are paused. These transaction row counts and function definitions must not change.

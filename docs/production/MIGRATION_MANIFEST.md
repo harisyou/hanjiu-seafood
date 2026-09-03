@@ -42,8 +42,11 @@ in this order. Do not rerun historical migrations merely because they appear her
 26. `supabase/f004-3-1-storefront-product-categories-read-policy.sql`
 27. `supabase/f004-3-3-in-stock-preorder-product-model.sql`
 28. `supabase/f005-1-product-catalog.sql` — admin editing maintenance window required;
-    follow [Phase 1 deployment](F005-1-CATALOG-DEPLOYMENT.md), then manually run
-    `supabase/f005-1-product-catalog-verify.sql` (verification only, not a migration).
+    **already applied in Production per owner verification; do not rerun**.
+29. `supabase/f005-1a-product-image-delete-lockdown.sql` — required Production
+    forward fix for the independently named `Allow authenticated delete` Storage
+    policy. Follow [Phase 1 deployment](F005-1-CATALOG-DEPLOYMENT.md), then run the
+    updated `supabase/f005-1-product-catalog-verify.sql` (read-only assertions).
 
 ## Operator rules
 

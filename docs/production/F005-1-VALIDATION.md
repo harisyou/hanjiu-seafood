@@ -1,5 +1,36 @@
 # Phase 1 validation record
 
+## F005-1a forward-fix validation (after owner applied F005-1)
+
+Production's reported `Allow authenticated delete` policy was not in the repo
+baseline. F005-1 removed only `admin delete product images`; its previous Storage
+verification was a listing/manual-review requirement, not a failing assertion.
+The original minimal test fixture did not include the independently named policy.
+
+- Added reproduction: authenticated DELETE succeeds before the fix and the new
+  verification assertion fails. After F005-1a, ordinary authenticated, admin and
+  anonymous DELETE affect zero product-images rows, and the objects remain.
+- Admin INSERT/upload-policy behavior and public SELECT remain valid. Unrelated
+  bucket DELETE still works and all unrelated policies compare unchanged.
+- Unexpected same-named policy scope makes the migration fail without modifying
+  policies. Already absent is a safe no-op.
+- Existing full catalog SQL test now applies F005-1 then F005-1a before exercising
+  gallery backfill/save/primary replacement/removal and metadata authorization.
+- Full regression: **189 passed, 0 failed, 2 skipped** (191 total). The two external
+  psql checkout tests still lack an explicitly configured disposable DB/psql.
+- TypeScript: **pass**. Next.js 15.5.22 production build: **pass**, using a clean
+  temporary export of the staged source to avoid the known OneDrive cache issue.
+- No frontend, original F005-1 migration or transaction-system code changed.
+  Codex executed no Production SQL. Owner must manually apply F005-1a and rerun
+  the updated verification; do not rerun F005-1.
+
+The assertions detect the two known policy names, not arbitrary SQL predicates.
+Remaining DELETE/ALL policies must still be reviewed for PUBLIC/inherited roles
+and product-images access. Tests use local in-memory PostgreSQL, not Storage API
+deletion against Production.
+
+## Original Phase 1 implementation validation
+
 Baseline: `4c4b909fc2326fa6821105d564e8f25497f363b4` (main).
 No Production SQL or Production writes were executed.
 

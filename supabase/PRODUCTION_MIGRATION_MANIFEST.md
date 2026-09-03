@@ -3,6 +3,10 @@
 The canonical complete ordered list is
 [docs/production/MIGRATION_MANIFEST.md](../docs/production/MIGRATION_MANIFEST.md).
 For Phase 1 follow [F005-1 deployment](../docs/production/F005-1-CATALOG-DEPLOYMENT.md).
+Production has already applied F005-1 per owner verification. Its next required
+manual migration is `f005-1a-product-image-delete-lockdown.sql`, NOT a rerun of
+F005-1. Then run the updated `f005-1-product-catalog-verify.sql`; the reported
+`Allow authenticated delete` policy must fail verification until removed.
 The F004 checklist below is historical feature-specific guidance, not an instruction
 to rerun migrations or reset existing preorder values.
 
@@ -24,6 +28,8 @@ small operational baseline, not a replacement for the historical migration files
    F004-3.3 application.
 6. Apply `f005-1-product-catalog.sql` manually before the Phase 1 app; see its
    dedicated execution/verification/forward-fix guide above.
+7. Apply `f005-1a-product-image-delete-lockdown.sql` after F005-1, then run the
+   updated catalog verification. For current Production, start with this step.
 
 ## F004-3.3 deployment checklist
 
