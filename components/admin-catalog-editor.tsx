@@ -71,10 +71,12 @@ export default function AdminCatalogEditor({ id, onSaved }: { id: string; onSave
     try {
       const result = await db.rpc("admin_save_product_catalog", { p_product_id: id, p_expected_updated_at: product.updated_at, p_content: product, p_images: images, p_faqs: faqs });
       if (result.error) throw result.error;
-      setProduct(result.data as Product); setOriginalFish(result.data.fish_catalog_id || null); setNotice("商品、圖片與 FAQ 已儲存。"); onSaved();
+      const saved = (Array.isArray(result.data) ? result.data[0] : result.data) as Product | null;
+      if (!saved?.id || !saved.updated_at) throw new Error("儲存回應不完整，請重新載入確認資料。");
+      setProduct(saved); setOriginalFish(saved.fish_catalog_id || null); setNotice("商品、圖片與 FAQ 已儲存。"); onSaved();
     } catch (error) {
       const message = error && typeof error === "object" && "message" in error ? String(error.message) : "";
-      setNotice(message.includes("catalog_edit_conflict") ? "商品已被其他操作更新。請先複製未儲存內容，再重新載入。" : message.includes("fish_catalog_already_used") ? "此魚種已有商品，請使用既有商品。" : `儲存失敗，未套用本次變更。${message}`);
+      setNotice(message.includes("catalog_edit_conflict") ? "商品已被其他操作更新。請先複製未儲存內容，再重新載入。" : message.includes("fish_catalog_already_used") ? "此魚種已有商品，請使用既有商品。" : `無法確認儲存結果，請重新載入確認後再試。${message}`);
     } finally { setBusy(false); }
   }
   if (!product) return <section className="panel"><p>{notice || "載入商品內容…"}</p><button type="button" onClick={load} disabled={busy}>重新載入</button></section>;

@@ -92,8 +92,10 @@ export default function AdminPage() {
     setBusy(true);
     const result = await supabase.rpc("admin_create_phase1_product", { p_name: form.name.trim(), p_category_id: form.category_id, p_fish_catalog_id: fishId || null });
     setBusy(false);
+    const created = Array.isArray(result.data) ? result.data[0] : result.data;
     if (result.error) setNotice(productSaveErrorMessage(result.error.message));
-    else router.push(`/admin/inventory/${result.data.id}`);
+    else if (!created?.id) setNotice("商品建立回應不完整，請重新載入商品列表確認，避免重複建立。");
+    else router.push(`/admin/inventory/${created.id}`);
   }
 
   async function toggle(product: Product) {
