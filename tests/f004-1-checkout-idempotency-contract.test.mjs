@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const migration = readFileSync(new URL("../supabase/f004-1-checkout-idempotency.sql", import.meta.url), "utf8");
-const storefront = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const storefront = readFileSync(new URL("../components/storefront-shell.tsx", import.meta.url), "utf8");
 
 test("F004-1 adds nullable metadata and partial DB uniqueness without historical backfill", () => {
   assert.match(migration, /add column if not exists checkout_idempotency_key uuid/);

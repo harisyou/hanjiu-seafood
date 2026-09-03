@@ -12,6 +12,18 @@ export type Product = {
   processing_enabled?: boolean;
   fish_catalog_id?: string | null;
   category_id?: string | null;
+  texture_description?: string | null;
+  storage_instructions?: string | null;
+  updated_at?: string;
+};
+
+export type ProductImage = {
+  id: string; product_id: string; storage_bucket: string | null; storage_path: string | null;
+  legacy_url: string | null; alt_text: string; sort_order: number; is_primary: boolean;
+  public_url?: string | null;
+};
+export type ProductFaq = {
+  id: string; product_id: string; question: string; answer: string; sort_order: number; active: boolean;
 };
 
 export type ProductCategoryRecord = {

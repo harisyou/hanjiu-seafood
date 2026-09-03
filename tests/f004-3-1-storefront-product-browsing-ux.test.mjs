@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const page = readFileSync(new URL("../components/storefront-shell.tsx", import.meta.url), "utf8");
 const filters = readFileSync(new URL("../app/product-filters.css", import.meta.url), "utf8");
 const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 const categoryReadPolicy = readFileSync(new URL("../supabase/f004-3-1-storefront-product-categories-read-policy.sql", import.meta.url), "utf8");

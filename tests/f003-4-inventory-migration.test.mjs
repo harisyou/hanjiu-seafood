@@ -6,7 +6,7 @@ const migration = readFileSync(
   new URL("../supabase/f003-4-inventory-management.sql", import.meta.url),
   "utf8"
 );
-const storefront = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const storefront = readFileSync(new URL("../components/storefront-shell.tsx", import.meta.url), "utf8");
 
 const atomicUpdate = /update public\.product_variants variant\s+set inventory = variant\.inventory - v_quantity\s+from public\.products product\s+where variant\.id = v_variant_id\s+and product\.id = variant\.product_id\s+and product\.status = 'available'\s+and variant\.active\s+and variant\.inventory >= v_quantity\s+returning[\s\S]+?into v_variant;\s+if not found then raise exception 'variant_unavailable';/i;
 

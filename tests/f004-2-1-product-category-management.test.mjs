@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 
 const migration = fs.readFileSync(new URL("../supabase/f004-2-1-product-category-management.sql", import.meta.url), "utf8");
-const storefront = fs.readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const storefront = fs.readFileSync(new URL("../components/storefront-shell.tsx", import.meta.url), "utf8");
 const adminProducts = fs.readFileSync(new URL("../app/admin/page.tsx", import.meta.url), "utf8");
 const adminCategories = fs.readFileSync(new URL("../app/admin/categories/page.tsx", import.meta.url), "utf8");
 

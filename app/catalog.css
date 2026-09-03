@@ -1,0 +1,27 @@
+.catalogDetail,.catalogDetail *,.catalogBrowseCard{min-width:0;box-sizing:border-box}
+.catalogDetail{padding-block:28px;overflow-wrap:anywhere}
+.catalogDetailGrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;margin-top:20px}
+.catalogGallery{width:100%;min-width:0;align-self:start}
+.catalogGalleryTrack{display:flex;width:100%;overflow-x:auto;scroll-snap-type:x mandatory;border-radius:16px}
+.catalogGalleryTrack>img{flex:0 0 100%;width:100%;min-width:100%;aspect-ratio:1;object-fit:cover;scroll-snap-align:start}
+.catalogThumbnails{display:flex;gap:8px;overflow-x:auto;margin-top:12px;padding:3px}
+.catalogThumbnails button{flex:0 0 64px;padding:2px;background:white;border:2px solid transparent;border-radius:8px}
+.catalogThumbnails button[aria-pressed=true]{border-color:#236b68}
+.catalogThumbnails img{width:56px;height:56px;object-fit:cover}
+.catalogCopy p,.catalogFaq p{white-space:pre-wrap;line-height:1.8}
+.catalogCopy h2,.catalogFaq h2{font-size:1.2rem}
+.catalogFaq{margin-top:32px}.catalogFaq details{padding:16px;border-bottom:1px solid #ddd}
+.catalogPlaceholder{display:grid;place-items:center;aspect-ratio:1;background:#eff5f3;font-size:4rem;border-radius:16px}
+.legacyPurchaseSection{max-width:760px;margin-inline:auto;padding-block:24px}
+.legacyPurchaseSection .storefrontProductGrid{display:block}
+.legacyPurchaseSection .storefrontProductCard>.photo{display:none}
+.legacyPurchaseSection .storefrontProductCard .variantSelectionSummary{grid-template-columns:minmax(150px,.85fr) minmax(0,1.15fr)}
+.catalogBrowseCard .catalogPrice{font-size:1.15rem;font-weight:700;overflow-wrap:normal}
+.catalogBadges{display:flex;flex-wrap:wrap;gap:8px;margin-block:12px}
+.catalogBadges span{background:#e6f1eb;padding:4px 10px;border-radius:20px}
+.catalogAdminRow{padding:16px;border:1px solid #ddd;margin-block:12px;border-radius:12px}
+.catalogAdminRow img{width:120px;height:100px;object-fit:cover}
+.catalogAdminActions{display:flex;gap:8px;flex-wrap:wrap}.catalogEditor textarea{min-height:90px}
+.catalogEditor fieldset{border:0;padding:0;min-width:0}
+@media(max-width:640px){.catalogDetailGrid{grid-template-columns:minmax(0,1fr);gap:16px}.catalogDetail{padding-inline:16px}.legacyPurchaseSection{padding-inline:16px}.catalogAdminActions button{font-size:.85rem}}
+@media(max-width:420px){.legacyPurchaseSection .storefrontProductCard .variantSelectionSummary{grid-template-columns:minmax(0,1fr)}}

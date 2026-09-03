@@ -38,7 +38,7 @@ test("an active product config cannot revive an inactive global option", () => {
 });
 
 test("storefront sanitizes restore, initialization, cart editing, and checkout payload without weakening the server guard", () => {
-  const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../components/storefront-shell.tsx", import.meta.url), "utf8");
   const migration = readFileSync(new URL("../supabase/f004-3-3-in-stock-preorder-product-model.sql", import.meta.url), "utf8");
   assert.match(page, /activeProductProcessingPresetConfigs\(/);
   assert.match(page, /activeProductProcessingOptionConfigs\(/);

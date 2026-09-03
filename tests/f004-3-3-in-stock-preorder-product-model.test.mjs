@@ -10,7 +10,7 @@ import {
   variantSupplyType
 } from "../lib/supply-model.mjs";
 
-const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const page = readFileSync(new URL("../components/storefront-shell.tsx", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../supabase/f004-3-3-in-stock-preorder-product-model.sql", import.meta.url), "utf8");
 const f0041Migration = readFileSync(new URL("../supabase/f004-1-checkout-idempotency.sql", import.meta.url), "utf8");
 const f00312Migration = readFileSync(new URL("../supabase/f003-12a-inventory-ledger-compat.sql", import.meta.url), "utf8");

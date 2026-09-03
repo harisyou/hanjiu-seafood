@@ -72,7 +72,10 @@ test("admin supports catalog maintenance, product classification, and request cl
   ]);
   assert.match(catalogPage, /搜尋魚種或別名/);
   assert.match(catalogPage, /等待需求/);
-  assert.match(inventoryPage, /魚種分類/);
+  assert.match(inventoryPage, /AdminCatalogEditor id=\{id\}/);
+  const editor = await readFile(new URL("../components/admin-catalog-editor.tsx", import.meta.url), "utf8");
+  assert.match(editor, /fish_catalog_id/);
+  assert.match(editor, /既有重複資料仍可編輯/);
   assert.match(requestPage, /歸類魚種/);
   assert.match(requestPage, /原始輸入保持不變/);
 });

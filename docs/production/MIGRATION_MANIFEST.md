@@ -36,6 +36,14 @@ in this order. Do not rerun historical migrations merely because they appear her
 21. `supabase/f003-18-repayment-lifecycle.sql`
 22. `supabase/f003-18-repayment-integrity.sql`
 23. `supabase/f004-1-checkout-idempotency.sql`
+24. `supabase/f004-2-1-product-category-management.sql` — verify any separately
+    approved production correction; do not assume this file proves applied state.
+25. `supabase/f004-2-2-product-category-assignment.sql`
+26. `supabase/f004-3-1-storefront-product-categories-read-policy.sql`
+27. `supabase/f004-3-3-in-stock-preorder-product-model.sql`
+28. `supabase/f005-1-product-catalog.sql` — admin editing maintenance window required;
+    follow [Phase 1 deployment](F005-1-CATALOG-DEPLOYMENT.md), then manually run
+    `supabase/f005-1-product-catalog-verify.sql` (verification only, not a migration).
 
 ## Operator rules
 
