@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const storefront = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const storefront = readFileSync(new URL("../components/storefront-shell.tsx", import.meta.url), "utf8");
 const inventoryPage = readFileSync(new URL("../app/admin/inventory/page.tsx", import.meta.url), "utf8");
 const inventoryDetail = readFileSync(new URL("../app/admin/inventory/[id]/page.tsx", import.meta.url), "utf8");
 const variantsPage = readFileSync(new URL("../app/admin/variants/page.tsx", import.meta.url), "utf8");
@@ -17,7 +17,7 @@ test("existing variant schema supports range name, fixed price, and remaining fi
 });
 
 test("storefront explains that ranges use pre-processing weight", () => {
-  assert.ok(storefront.includes("重量皆以魚貨處理前秤重為準，去鱗、去鰓、去內臟等處理後，實際收到重量會減少。"));
+  assert.ok(storefront.includes("※ 商品重量皆為處理前重量，處理後重量會依處理方式有所減少。"));
 });
 
 test("zero-inventory variant remains visible and only non-preorder variants are disabled", () => {
@@ -28,7 +28,8 @@ test("zero-inventory variant remains visible and only non-preorder variants are 
   assert.match(storefront, /\{variant\.name\}｜\{formatPrice\(variant\.price\)\}<\/option>/);
   assert.match(storefront, /selectedVariant\.preorder_enabled \? selectedVariant\.inventory > 0 \? `現貨剩 \$\{selectedVariant\.inventory\} 件｜可預訂` : "目前無現貨｜可預訂"/);
   assert.match(storefront, /const soldOut = purchasableVariants\.length === 0/);
-  assert.match(storefront, /<small>\{soldOut \? "已售完" : "今日供應"\}<\/small>/);
+  assert.match(storefront, /if \(soldOut\) return <article className="catalogSoldOut"/);
+  assert.match(storefront, /<button type="button" disabled>已售完<\/button>/);
 });
 
 test("one sold-out range does not change the product or sibling variants", () => {

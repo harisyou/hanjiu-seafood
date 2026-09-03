@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const page = readFileSync(new URL("../components/storefront-shell.tsx", import.meta.url), "utf8");
 const filters = readFileSync(new URL("../app/product-filters.css", import.meta.url), "utf8");
 const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 const categoryReadPolicy = readFileSync(new URL("../supabase/f004-3-1-storefront-product-categories-read-policy.sql", import.meta.url), "utf8");
@@ -54,8 +54,8 @@ test("anonymous category reads never evaluate the admin authorization function",
 test("sold-out cards keep the status in their information area without obscuring the photo", () => {
   assert.match(page, /storefrontProductCard/);
   assert.doesNotMatch(page, /productAvailability/);
-  assert.match(page, /<small>\{soldOut \? "已售完" : "今日供應"\}<\/small>/);
-  assert.match(page, /product\.featured && <div className="productCardBadges"><b>本日精選<\/b><\/div>/);
+  assert.match(page, /if \(soldOut\) return <article className="catalogSoldOut"/);
+  assert.match(page, /目前暫無可購買規格/);
   assert.match(page, /選擇規格/);
   assert.match(page, /本次可購買/);
   assert.match(page, /加入購物車/);

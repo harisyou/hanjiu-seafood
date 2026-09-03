@@ -8,7 +8,12 @@ import { isValidEmail, isValidTaiwanMobile, normalizeTaiwanMobile, taipeiCurrent
 import { checkoutRequestFingerprint, checkoutRetryKey, clearCheckoutRetryKey } from "@/lib/checkout-idempotency";
 import { activeProductProcessingOptionConfigs, activeProductProcessingPresetConfigs, validProcessingSelection } from "@/lib/processing-availability";
 import { cartQuantityForVariant, remainingInStockPurchasable, shouldShowExcessPreorderNotice, supplyTypeForQuantity, variantSupplyType } from "@/lib/supply-model";
-import FishRequestForm from "./fish-request-form";
+import FishRequestForm from "@/app/fish-request-form";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { createPublicClient } from "@/lib/supabase-public";
+import { legacySummary, primaryImage } from "@/lib/catalog-content";
+import type { ProductImage } from "@/lib/catalog";
 
 type SupplyType = "in_stock" | "preorder";
 
@@ -83,7 +88,14 @@ function processingSignature(variantId: string, supplyType: SupplyType, selectio
   return [variantId, supplyType, selection.presetId || "custom", [...selection.optionIds].sort().join(","), selection.note.trim()].join("::");
 }
 
-export default function HomePage() {
+// Persistent layout owner: cart, restoration, checkout retries and processing stay mounted across routes.
+export default function StorefrontShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const isCatalog = pathname === "/";
+  const productId = pathname.match(/^\/products\/([^/]+)$/)?.[1];
+  const publicDb = useMemo(() => createPublicClient(true), []);
+  const [galleryImages, setGalleryImages] = useState<ProductImage[]>([]);
   const supabase = useMemo(() => createClient(), []);
   const [products, setProducts] = useState<Product[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -162,16 +174,19 @@ export default function HomePage() {
       setCatalogError("");
       setCategoryLoadError("");
       try {
-      const [productResult, variantResult, categoryResult, optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult] = await Promise.all([
-        supabase.from("products").select("*").neq("status", "hidden").order("sort_order"),
-        supabase.from("product_variants").select("*").eq("active", true).order("sort_order"),
-        supabase.from("product_categories").select("id,name,sort_order,active").eq("active", true).order("sort_order").order("name"),
-        supabase.from("processing_options").select("*").eq("active", true).order("sort_order"),
-        supabase.from("processing_presets").select("*").eq("active", true).order("sort_order"),
-        supabase.from("processing_preset_options").select("*"),
-        supabase.from("product_processing_options").select("*").eq("active", true).order("sort_order"),
-        supabase.from("product_processing_presets").select("*").eq("active", true).order("sort_order")
+      const [productResult, variantResult, categoryResult, optionResult, presetResult, presetOptionResult, productOptionResult, productPresetResult, imageResult] = await Promise.all([
+        publicDb.from("products").select("*").neq("status", "hidden").order("sort_order"),
+        publicDb.from("product_variants").select("*").eq("active", true).order("sort_order"),
+        publicDb.from("product_categories").select("id,name,sort_order,active").eq("active", true).order("sort_order").order("name"),
+        publicDb.from("processing_options").select("*").eq("active", true).order("sort_order"),
+        publicDb.from("processing_presets").select("*").eq("active", true).order("sort_order"),
+        publicDb.from("processing_preset_options").select("*"),
+        publicDb.from("product_processing_options").select("*").eq("active", true).order("sort_order"),
+        publicDb.from("product_processing_presets").select("*").eq("active", true).order("sort_order"),
+        publicDb.from("product_images").select("*").order("sort_order").order("id")
       ]);
+      if (imageResult.error) throw new Error("商品圖片載入失敗，請確認 Catalog migration。");
+      setGalleryImages((imageResult.data || []) as ProductImage[]);
       if (productResult.error) setNotice(`商品載入失敗：${productResult.error.message}`);
       else setProducts((productResult.data || []) as Product[]);
       if (variantResult.error) setNotice(`規格載入失敗：${variantResult.error.message}`);
@@ -202,7 +217,7 @@ export default function HomePage() {
       }
     }
     loadCatalog();
-  }, [catalogRefresh, supabase]);
+  }, [catalogRefresh, publicDb]);
 
   useEffect(() => {
     if (selectedProductCategory !== "all" && !productCategories.some((category) => category.id === selectedProductCategory && category.active)) setSelectedProductCategory("all");
@@ -687,7 +702,8 @@ export default function HomePage() {
 
   function goToCheckout() {
     setDrawerOpen(false);
-    window.setTimeout(() => document.getElementById("order")?.scrollIntoView({ behavior: "smooth" }), 220);
+    if (!isCatalog) router.push("/#order");
+    else window.setTimeout(() => document.getElementById("order")?.scrollIntoView({ behavior: "smooth" }), 220);
   }
 
   const maskedPhone = savedProfile?.phone.replace(/^(\d{4})\d+(\d{3})$/, "$1-***-$2") || "";
@@ -697,9 +713,9 @@ export default function HomePage() {
 
   return (
     <main>
-      <header className="hero">
+      <header className={isCatalog ? "hero" : "hero catalogHeader"}>
   <nav>
-    <strong>韓九海鮮</strong>
+    <Link href="/">韓九海鮮</Link>
       <button
         className="headerCartButton"
         type="button"
@@ -720,13 +736,15 @@ export default function HomePage() {
       </button>
   </nav>
 
-  <picture className="heroPicture">
+  {isCatalog && <picture className="heroPicture">
     <source media="(max-width: 560px)" srcSet="/hero-mobile.png" />
     <img src="/hero-desktop.png" alt="南方澳船釣海魚" />
-  </picture>
+  </picture>}
 </header>
-      <section className="content productBrowsingSection">
-        <div className="heading productBrowsingHeading"><div><small>TODAY&apos;S CATCH</small><h2>今日海鮮</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
+      <div className="catalogProductLayout">
+      {children}
+      {isCatalog && <section className="content productBrowsingSection" id="catalog">
+        <div className="heading productBrowsingHeading"><div><small>SEAFOOD CATALOG</small><h2>海鮮商品</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
         <section className="productFilters" aria-label="商品搜尋與篩選">
           <label className="productSearchField">
             <span aria-hidden="true">⌕</span>
@@ -737,6 +755,7 @@ export default function HomePage() {
             <div className="productCategoryChips" role="group" aria-label="商品分類">
               {storefrontCategories.map((category) => <button type="button" key={category.id} className={selectedProductCategory === category.id ? "isActive" : ""} aria-pressed={selectedProductCategory === category.id} onClick={() => setSelectedProductCategory(category.id)}>{category.name}</button>)}
             </div>
+            {storefrontCategories.length > 3 && <small className="categoryScrollHint">左右滑動查看更多分類 →</small>}
             <label className="stockOnlyToggle">
               <input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} />
               <span>只看有貨</span>
@@ -750,6 +769,22 @@ export default function HomePage() {
         </div>
         {catalogLoading ? <div className="productBrowseLoading" role="status" aria-live="polite"><span className="srOnly">商品載入中</span>{Array.from({ length: 3 }).map((_, index) => <div className="productBrowseSkeleton" key={index} aria-hidden="true"><span /><b /><i /></div>)}</div> : catalogError ? <div className="productBrowseError" role="alert"><strong>暫時無法載入今日海鮮</strong><p>{catalogError}</p><button type="button" onClick={() => setCatalogRefresh((current) => current + 1)}>重新載入</button></div> : filteredProducts.length === 0 ? <div className="productFilterEmpty" role="status" aria-live="polite"><strong>{filtersActive ? "目前沒有符合條件的商品" : "今天的魚貨正在準備中"}</strong><p>{filtersActive ? "試試其他關鍵字或分類，看看更多今日魚貨。" : "稍後再回來看看，或先告訴韓九您想找什麼。"}</p>{filtersActive ? <button type="button" className="productFilterReset" onClick={clearProductFilters}>清除篩選</button> : <a className="productBrowseRequestLink" href="#fish-request">告訴韓九我想找什麼</a>}</div> : <div className="grid storefrontProductGrid" id="product-grid">
           {filteredProducts.map((product) => {
+            const summary = legacySummary(product, variants);
+            const cover = primaryImage(product, galleryImages, process.env.NEXT_PUBLIC_SUPABASE_URL || "");
+            return <article className="card catalogBrowseCard" key={product.id}>
+              <div className="photo">{cover ? <img src={cover} alt={product.name} loading="lazy" /> : <span role="img" aria-label="尚無商品圖片">🐟</span>}</div>
+              <div className="body"><small>{productCategories.find((category) => category.id === product.category_id)?.name}</small><h3>{product.name}</h3>
+                <p className="catalogPrice">{summary.min !== null ? <>{formatPrice(summary.min)}{summary.max !== summary.min ? " 起" : ""}</> : <span aria-hidden="true">—</span>}</p>
+                <div className="catalogBadges">{summary.inStock && <span>現貨</span>}{summary.preorder && <span>可預訂</span>}{!summary.inStock && !summary.preorder && <span>暫無可購買規格</span>}</div>
+                <Link className="buttonLink" href={`/products/${product.id}`}>查看商品</Link>
+              </div>
+            </article>;
+          })}
+        </div>}
+      </section>}
+      {productId && products.some((product) => product.id === productId && product.status !== "hidden") && <section className="content legacyPurchaseSection" aria-label="商品購買"><h2>選擇規格與處理方式</h2>
+        {catalogLoading ? <p role="status">購買資料載入中…</p> : catalogError ? <p role="alert">{catalogError}<button onClick={() => setCatalogRefresh((current) => current + 1)}>重新載入</button></p> : <div className="grid storefrontProductGrid">
+          {products.filter((product) => product.id === productId).map((product) => {
             const productVariants = variants.filter((variant) => variant.product_id === product.id);
             const displayVariants = productVariants.filter((variant) => variant.active);
             const purchasableVariants = displayVariants.filter((variant) => variantSupplyType(variant) !== null && product.status === "available");
@@ -781,9 +816,9 @@ export default function HomePage() {
                   : cartActionStatus === "success"
                     ? "✓ 已加入購物車"
                     : "加入購物車";
-            return <article className={`card storefrontProductCard ${soldOut ? "isSoldOut" : "isAvailable"}`} key={product.id}>
-              <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span aria-label="尚無商品圖片" role="img">🐟</span>}{product.featured && <div className="productCardBadges"><b>本日精選</b></div>}</div>
-              <div className="body"><div className="productCardIntro"><div><small>{soldOut ? "已售完" : "今日供應"}</small>{!soldOut && <span>{purchasableVariants.length} 個可購買規格</span>}<h3>{product.name}</h3></div></div><p className="productDescription">{product.description || "今日新鮮上架，規格與價格請見下方。"}</p><p className="productCooking">料理建議：{product.cooking || "歡迎詢問"}</p>
+            if (soldOut) return <article className="catalogSoldOut" key={product.id}><p role="status">目前暫無可購買規格</p><button type="button" disabled>已售完</button></article>;
+            return <article className="card storefrontProductCard isAvailable" key={product.id}>
+              <div className="body">
                 {displayVariants.length > 0 && <div className="variantSelector">
                   <label htmlFor={`variant-${product.id}`}>選擇規格</label>
                   <p className="variantSelectorHint">{selectedVariant ? "已依您選擇更新價格與可購買狀態。" : hasMultipleVariantPrices ? "不同規格有不同價格，請選擇後查看確切價格。" : "請選擇規格查看價格與可購買狀態。"}</p>
@@ -795,7 +830,7 @@ export default function HomePage() {
                       return <option value={variant.id} disabled={unavailable} key={variant.id}>{variant.name}｜{formatPrice(variant.price)}</option>;
                     })}
                   </select>
-                  <p className="weightBasisNotice">重量皆以魚貨處理前秤重為準，去鱗、去鰓、去內臟等處理後，實際收到重量會減少。</p>
+                  <p className="weightBasisNotice">※ 商品重量皆為處理前重量，處理後重量會依處理方式有所減少。</p>
                   {staleSelectedVariant && !soldOut && <p className="variantUnavailableNotice" role="status">此規格目前無法購買，請重新選擇。</p>}
                   {selectedVariant && <>
                     <div className="variantDetails variantSelectionSummary" aria-live="polite" aria-atomic="true">
@@ -830,13 +865,14 @@ export default function HomePage() {
             </article>;
           })}
         </div>}
-      </section>
-      <section id="fish-request" className="fishRequestSection">
+      </section>}
+      </div>
+      {isCatalog && <section id="fish-request" className="fishRequestSection">
         <div className="fishRequestShell">
           <header className="fishRequestHeading"><small>FISH WISHLIST</small><h2>🔔 想找的魚</h2><p>今天沒有看到想要的魚？<br />可以先告訴我，之後有看到我再通知你。</p><a className="fishRequestAnchor" href="#fish-request-form">告訴韓九我想找什麼</a></header>
           <div id="fish-request-form"><FishRequestForm /></div>
         </div>
-      </section>
+      </section>}
       <div className={`cartDrawerLayer ${drawerOpen ? "isOpen" : ""}`} aria-hidden={!drawerOpen} onClick={() => setDrawerOpen(false)}>
         <aside className="cartDrawer" role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title" onClick={(event) => event.stopPropagation()}>
           <header className="cartDrawerHeader"><div><small>YOUR CATCH</small><h2 id="cart-drawer-title">購物車</h2></div><button type="button" aria-label="關閉購物車" onClick={() => setDrawerOpen(false)}>×</button></header>
@@ -851,7 +887,7 @@ export default function HomePage() {
               const cartOptions = activeProductProcessingOptionConfigs(item.product_id, productProcessingOptions, processingOptions).map((config) => processingOptions.find((option) => option.id === config.processing_option_id)).filter((option): option is ProcessingOption => Boolean(option));
               const processingSummary = summarizedProcessing(item);
               return <article className={`drawerCartItem ${item.supply_type === "preorder" ? "isPreorder" : "isInStock"}`} key={item.cart_key}>
-                <div className="drawerItemImage">{product?.image_url ? <img src={product.image_url} alt={item.product_name} /> : <span>🐟</span>}</div>
+                <div className="drawerItemImage">{product && primaryImage(product, galleryImages, process.env.NEXT_PUBLIC_SUPABASE_URL || "") ? <img src={primaryImage(product, galleryImages, process.env.NEXT_PUBLIC_SUPABASE_URL || "")!} alt={item.product_name} /> : <span>🐟</span>}</div>
                 <div className="drawerItemInfo"><h3>{item.product_name}</h3><p>{item.variant_name}</p><span className={`cartSupplyBadge ${item.supply_type === "preorder" ? "isPreorder" : "isInStock"}`}>{item.supply_type === "preorder" ? "🟠 預訂" : "🟢 現貨"}</span>{item.supply_type === "preorder" && <small className="preorderCartNotice">目前現貨 {variant?.inventory || 0} 件，此數量將以預訂方式處理。</small>}<span className="priceTag"><small>單價</small>{formatPrice(item.price)}</span><div className="cartProcessingSummary"><strong>處理：{processingSummary.name}</strong>{processingSummary.extras.map((name) => <span key={name}>＋{name}</span>)}{item.processing_note && <span>其他需求：{item.processing_note}</span>}</div><strong className="itemSubtotal"><span>小計</span>{formatPrice(item.price * item.quantity)}</strong></div>
                 {product?.processing_enabled && <details className="cartProcessingEditor"><summary>編輯處理方式</summary><div><div className="cartProcessingPresets">{cartPresets.map((preset) => <button type="button" className={item.processing_preset_id === preset.id ? "isSelected" : ""} onClick={() => selectCartPreset(item, preset.id)} key={preset.id}>{preset.name}</button>)}</div><div className="cartProcessingOptions">{cartOptions.map((option) => <label key={option.id}><input type="checkbox" checked={item.processing_option_ids.includes(option.id)} onChange={() => toggleCartOption(item, option.id)} />{option.name}</label>)}</div><label>其他處理需求<textarea rows={2} defaultValue={item.processing_note} onBlur={(event) => updateCartProcessing(item.cart_key, { presetId: item.processing_preset_id, optionIds: item.processing_option_ids, note: event.target.value })} /></label></div></details>}
                 <div className="drawerItemActions"><div className="quantity"><button type="button" aria-label={`減少 ${item.variant_name} 數量`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, item.quantity - 1)}>−</button><span className={animatedCartQuantity === `${item.variant_id}-${item.quantity}` ? "cartQuantityPulse" : ""} key={`${item.variant_id}-${item.quantity}`}>{item.quantity}</span><button type="button" aria-label={`增加 ${item.variant_name} 數量`} disabled={cartBusy || !variant || (!variant.preorder_enabled && totalVariantQuantity >= purchaseLimit)} onClick={() => changeQuantity(item.cart_key, item.quantity + 1)}>＋</button></div><button className="removeCartItem" type="button" aria-label={`移除${item.product_name} ${item.variant_name}`} disabled={cartBusy} onClick={() => changeQuantity(item.cart_key, 0)}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>
@@ -867,7 +903,7 @@ export default function HomePage() {
         </aside>
       </div>
       {cartToast && <div className="cartToast" role="status" aria-live="polite">✓ {cartToast}</div>}
-      <section id="order" className="order checkoutSection">
+      {isCatalog && <section id="order" className="order checkoutSection">
         <div className="checkoutShell">
           <header className="checkoutHeading"><small>SMART CHECKOUT</small><h2>確認配送與聯絡資料</h2><p>不需登入，選好配送方式即可完成訂購。</p></header>
           {savedProfile && <section className="returningCustomer" aria-labelledby="returning-title">
@@ -899,7 +935,7 @@ export default function HomePage() {
             <button className="submitOrderButton" type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>{isSubmitting ? "送出中…" : "送出訂單"}</button><div className="checkoutNotice" aria-live="polite">{notice && <p className="notice">{notice}</p>}</div>
           </form>}
         </div>
-      </section>
+      </section>}
     </main>
   );
 }

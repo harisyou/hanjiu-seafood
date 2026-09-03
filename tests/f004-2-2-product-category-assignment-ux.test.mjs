@@ -3,7 +3,8 @@ import fs from "node:fs";
 import test from "node:test";
 
 const adminProducts = fs.readFileSync(new URL("../app/admin/page.tsx", import.meta.url), "utf8");
-const storefront = fs.readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const editor = fs.readFileSync(new URL("../components/admin-catalog-editor.tsx", import.meta.url), "utf8");
+const storefront = fs.readFileSync(new URL("../components/storefront-shell.tsx", import.meta.url), "utf8");
 const productFilters = fs.readFileSync(new URL("../lib/product-filters.mjs", import.meta.url), "utf8");
 const migration = fs.readFileSync(new URL("../supabase/f004-2-2-product-category-assignment.sql", import.meta.url), "utf8");
 
@@ -11,8 +12,8 @@ test("admin assignment loads database categories in sort order and saves the sel
   assert.match(adminProducts, /from\("product_categories"\)\.select\("\*"\)\.order\("sort_order"\)\.order\("name"\)/);
   assert.match(adminProducts, /category_id: ""/);
   assert.match(adminProducts, /p_category_id: form\.category_id/);
-  assert.match(adminProducts, /admin_create_catalog_product/);
-  assert.match(adminProducts, /admin_update_catalog_product/);
+  assert.match(adminProducts, /admin_create_phase1_product/);
+  assert.match(editor, /admin_save_product_catalog/);
   assert.match(adminProducts, /請選擇有效的商品類別/);
   assert.match(adminProducts, /activeProductCategories\.map/);
 });
@@ -24,10 +25,8 @@ test("new categories remain data-driven and inactive categories cannot be assign
 });
 
 test("editing an item in a disabled category preserves and explains its current category until reassigned", () => {
-  assert.match(adminProducts, /目前商品類別「\$\{category\.name\}」已停用；請改選啟用中的商品類別後再儲存/);
-  assert.match(adminProducts, /selectedFormCategory && !selectedFormCategory\.active/);
-  assert.match(adminProducts, /已停用，請重新選擇/);
-  assert.match(adminProducts, /僅可指派啟用中的類別；選單依前台排序顯示/);
+  assert.match(editor, /category\.active \|\| category\.id === product\.category_id/);
+  assert.match(editor, /已停用，可保留既有指派/);
 });
 
 test("storefront continues to filter by the updated relational category_id", () => {
