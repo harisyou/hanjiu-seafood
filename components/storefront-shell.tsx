@@ -741,6 +741,7 @@ export default function StorefrontShell({ children }: { children: React.ReactNod
     <img src="/hero-desktop.png" alt="南方澳船釣海魚" />
   </picture>}
 </header>
+      <div className="catalogProductLayout">
       {children}
       {isCatalog && <section className="content productBrowsingSection" id="catalog">
         <div className="heading productBrowsingHeading"><div><small>SEAFOOD CATALOG</small><h2>海鮮商品</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
@@ -865,6 +866,7 @@ export default function StorefrontShell({ children }: { children: React.ReactNod
           })}
         </div>}
       </section>}
+      </div>
       {isCatalog && <section id="fish-request" className="fishRequestSection">
         <div className="fishRequestShell">
           <header className="fishRequestHeading"><small>FISH WISHLIST</small><h2>🔔 想找的魚</h2><p>今天沒有看到想要的魚？<br />可以先告訴我，之後有看到我再通知你。</p><a className="fishRequestAnchor" href="#fish-request-form">告訴韓九我想找什麼</a></header>

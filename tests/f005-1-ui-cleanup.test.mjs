@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 const read = path => readFileSync(new URL(`../${path}`,import.meta.url),'utf8');
+test('desktop polish preserves the accepted purchase markup byte-for-byte',()=>{
+  const source=read('components/storefront-shell.tsx');
+  const start=source.indexOf('<section className="content legacyPurchaseSection"');
+  const block=source.slice(start,source.indexOf('      </section>}',start)+19).replace(/\r\n/g,'\n').trim();
+  // Baseline: approved PR #40 revision 710b760. Placement wrapper is outside this block.
+  assert.equal(createHash('sha256').update(block).digest('hex'),'cfdccbadf89e0a2c50987b0849871974eb1e015ac2375d39c7b018527da212c2');
+});
 test('catalog image contract is 4:3 with contain, stable gallery, and advisory admin size',()=>{
   const css=read('app/catalog.css'), gallery=read('components/product-gallery.tsx'), editor=read('components/admin-catalog-editor.tsx');
   assert.match(css,/\.catalogGalleryTrack\s*\{[^}]*aspect-ratio: 4 \/ 3/);

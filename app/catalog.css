@@ -89,3 +89,39 @@ html { scroll-padding-top: 88px; }
 @media (max-width: 420px) {
   .legacyPurchaseSection .storefrontProductCard .variantSelectionSummary { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Desktop composition only: the persistent purchase component stays in place. */
+@media (min-width: 1024px) {
+  .catalogProductLayout:has(> .catalogDetail) {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 32px;
+    width: calc(100% - 64px);
+    max-width: 1280px;
+    margin: 20px auto 48px;
+    align-items: start;
+  }
+  .catalogProductLayout > .catalogDetail { display: contents; }
+  .catalogProductLayout .catalogBackLink { grid-column: 1 / -1; justify-self: start; }
+  .catalogProductLayout .catalogDetailGrid {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+    gap: 36px;
+    margin-top: -20px;
+  }
+  .catalogInformation h1 { font-size: 36px; margin-bottom: 16px; }
+  .catalogDescription { font-size: 16px; line-height: 1.85; margin-bottom: 24px; }
+  .catalogAttributes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+  .catalogAttributes > div { display: block; padding: 0 0 12px; }
+  .catalogAttributes dt { margin-bottom: 6px; font-size: 15px; }
+  .catalogAttributes dd { font-size: 15px; line-height: 1.8; }
+  .catalogProductLayout .catalogFaq { grid-column: 1; margin: 0; padding-top: 12px; }
+  .catalogProductLayout .catalogFaq h2 { font-size: 20px; margin-bottom: 12px; }
+  .catalogProductLayout .catalogFaq summary { font-size: 16px; }
+  .catalogProductLayout .catalogFaq p { font-size: 15px; }
+  .catalogProductLayout > .legacyPurchaseSection { grid-column: 1 / -1; width: 100%; max-width: 700px; padding: 0; margin: 0 auto; }
+  .catalogProductLayout:has(.catalogFaq) > .legacyPurchaseSection { grid-column: 2; }
+}
+@media (min-width: 1280px) {
+  .catalogProductLayout .catalogDetailGrid { grid-template-columns: minmax(0, 550px) minmax(0, 1fr); gap: 48px; }
+}

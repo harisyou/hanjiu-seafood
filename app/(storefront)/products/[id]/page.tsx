@@ -34,7 +34,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         {product.description && <p className="catalogDescription">{product.description}</p>}
         <dl className="catalogAttributes">{[["肉質／口感", product.texture_description], ["推薦料理", product.cooking], ["保存方式", product.storage_instructions]].map(([title, value]) => value ? <div key={title}><dt>{title}</dt><dd>{value}</dd></div> : null)}
         {product.processing_enabled && processingNames.length > 0 && <div><dt>可選處理</dt><dd>{processingNames.join("、")}（處理費 NT$0）</dd></div>}</dl>
-        {questions.length > 0 && <section className="catalogFaq"><h2>商品常見問題</h2>{questions.map((faq) => <details key={faq.id}><summary>{faq.question}</summary><p>{faq.answer}</p></details>)}</section>}
       </div></div>
+    {questions.length > 0 && <section className="catalogFaq"><h2>商品常見問題</h2>{questions.map((faq) => <details key={faq.id}><summary>{faq.question}</summary><p>{faq.answer}</p></details>)}</section>}
   </article>;
 }

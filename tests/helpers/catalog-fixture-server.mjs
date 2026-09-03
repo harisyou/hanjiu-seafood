@@ -3,6 +3,13 @@
 import { createServer } from 'node:http';
 import { fixtures } from './catalog-fixtures.mjs';
 const data = fixtures();
+if (process.env.CATALOG_FIXTURE_LAYOUT === '1') {
+  data.products[0].description = ['馬頭魚細緻的肉質帶有自然鮮甜，適合清蒸，也適合以簡單調味煮湯，保留魚肉本身的香氣。', '每尾魚的大小與外觀略有不同，請依下方規格挑選。商品圖片呈現完整魚身，實際魚貨以當日到貨為準。', '料理前請先依需求解凍並擦乾，採用適當火候避免過度烹調。若有特殊處理需求，可於購買區選擇處理方式並填寫備註。'].join('\n\n');
+  data.products[0].texture_description = '肉質細緻柔嫩，帶有自然鮮甜。不同部位口感略有差異，魚皮與魚肉可以一起品嚐。';
+  data.products[0].cooking = '清蒸、煮湯或乾煎均適合。清蒸可搭配薑絲與蔥段；煮湯以簡單調味保留鮮味。';
+  data.products[0].storage_instructions = '收到後請盡速冷藏並食用。若需較長時間保存，請分裝密封冷凍；避免反覆解凍。';
+  Object.assign(data.products[1], {name:'白蝦', description:'鮮甜白蝦，適合清蒸或鹽烤。', texture_description:null, cooking:'清蒸／鹽烤', storage_instructions:null, processing_enabled:false});
+}
 const adminMode = process.env.CATALOG_FIXTURE_ADMIN === '1';
 const user = {id:'90000000-0000-4000-8000-000000000001',email:'fixture@example.test',role:'authenticated',aud:'authenticated'};
 createServer(async (req,res)=>{
