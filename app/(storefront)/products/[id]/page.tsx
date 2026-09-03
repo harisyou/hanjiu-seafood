@@ -28,14 +28,13 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
     return (Array.isArray(value) ? value : [value]).map((entry) => entry.name);
   }))];
   return <article className="content catalogDetail">
-    <Link href="/">← 返回商品目錄</Link>
+    <Link className="catalogBackLink" href="/#catalog">← 返回商品目錄</Link>
     <div className="catalogDetailGrid"><ProductGallery images={(images.data || []) as ProductImage[]} fallback={product.image_url} name={product.name} />
-      <div><small>{categories.data?.name}</small><h1>{product.name}</h1>
-        {[["商品介紹", product.description], ["肉質／口感", product.texture_description], ["推薦料理", product.cooking], ["保存方式", product.storage_instructions]].map(([title, value]) => value ? <section className="catalogCopy" key={title}><h2>{title}</h2><p>{value}</p></section> : null)}
-        {product.processing_enabled && processingNames.length > 0 && <section><h2>可選處理方式</h2><p>{processingNames.join("、")}（處理費 NT$0）</p></section>}
-        <p className="weightBasisNotice">※ 商品重量皆為處理前重量，處理後重量會依處理方式有所減少。</p>
-        {product.status === "sold_out" && <p role="status">目前暫停購買，商品資訊仍可瀏覽。</p>}
+      <div className="catalogInformation"><small>{categories.data?.name}｜{product.status === "sold_out" ? "暫停購買" : "規格供應見下方"}</small><h1>{product.name}</h1>
+        {product.description && <p className="catalogDescription">{product.description}</p>}
+        <dl className="catalogAttributes">{[["肉質／口感", product.texture_description], ["推薦料理", product.cooking], ["保存方式", product.storage_instructions]].map(([title, value]) => value ? <div key={title}><dt>{title}</dt><dd>{value}</dd></div> : null)}
+        {product.processing_enabled && processingNames.length > 0 && <div><dt>可選處理</dt><dd>{processingNames.join("、")}（處理費 NT$0）</dd></div>}</dl>
+        {questions.length > 0 && <section className="catalogFaq"><h2>商品常見問題</h2>{questions.map((faq) => <details key={faq.id}><summary>{faq.question}</summary><p>{faq.answer}</p></details>)}</section>}
       </div></div>
-    {questions.length > 0 && <section className="catalogFaq"><h2>商品常見問題</h2>{questions.map((faq) => <details key={faq.id}><summary>{faq.question}</summary><p>{faq.answer}</p></details>)}</section>}
   </article>;
 }

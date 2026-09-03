@@ -63,6 +63,15 @@ test('real storefront component preserves cart across route updates and refresh,
  try {
   await act(async()=>{renderer=Renderer.create(render())});
   assert.equal(renderer.root.findAllByProps({className:'variantSelector'}).length,0);
+  for(const missing of ['missing', '10000000-0000-4000-8000-999999999999', ids.hidden]) {
+   await route(`/products/${missing}`);
+   assert.equal(renderer.root.findAllByProps({'aria-label':'商品購買'}).length,0);
+   assert.doesNotMatch(JSON.stringify(renderer.toJSON()),/選擇規格與處理方式|variantSelector|productProcessing|addToCartButton/);
+  }
+  await route(`/products/${ids.sold}`);
+  assert.match(JSON.stringify(renderer.toJSON()),/目前暫無可購買規格/);
+  assert.equal(renderer.root.findAllByProps({className:'variantSelector'}).length,0);
+  assert.equal(renderer.root.findByProps({className:'catalogSoldOut'}).findByType('button').props.disabled,true);
   await route(`/products/${ids.p1}`);
   assert.equal(selectedQuantity(),1);assert.equal(notice(),0);
   for(let n=1;n<10;n++)await click('增加數量');

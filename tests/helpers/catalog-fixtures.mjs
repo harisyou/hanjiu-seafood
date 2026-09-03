@@ -8,7 +8,7 @@ export function fixtures() {
       { id:'30000000-0000-4000-8000-000000000002', product_id:ids.p2, name:'526g', price:12999, inventory:10, preorder_enabled:false, active:true, sort_order:0 },
       { id:'30000000-0000-4000-8000-000000000003', product_id:ids.p3, name:'713g', price:1080, inventory:0, preorder_enabled:true, active:true, sort_order:0 }
     ],
-    product_categories:[{ id:ids.category, name:'海魚', active:true, sort_order:0 }],
+    product_categories:[{ id:ids.category, name:'海魚', active:true, sort_order:0 }, ...['蝦類','貝類','軟絲小卷','其他海鮮'].map((name,index)=>({id:`20000000-0000-4000-8000-00000000000${index+2}`,name,active:true,sort_order:index+1}))],
     processing_options:[{ id:'scale', name:'去鱗', active:true, sort_order:0 }],
     processing_presets:[{ id:'none', name:'不處理', description:'完整魚身', active:true, sort_order:0 }],
     processing_preset_options:[],

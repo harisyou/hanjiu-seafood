@@ -15,7 +15,7 @@ export default function ProductGallery({ images, fallback, name }: { images: Pro
   return <section className="catalogGallery" aria-label={`${name}商品圖片`}>
     <div className="catalogGalleryTrack" ref={track} tabIndex={0} onScroll={() => {
       const node = track.current; if (node) setSelected(Math.round(node.scrollLeft / (node.clientWidth || 1)));
-    }}>{slides.map((slide) => <img key={slide.id} src={slide.src} alt={slide.alt} />)}</div>
+    }}>{slides.map((slide) => <img key={slide.id} src={slide.src} alt={slide.alt} width={1600} height={1200} />)}</div>
     {slides.length > 1 && <div className="catalogThumbnails">{slides.map((slide, index) => <button key={slide.id} type="button" aria-label={`查看第 ${index + 1} 張圖片`} aria-pressed={selected === index} onClick={() => track.current?.scrollTo({ left: index * track.current.clientWidth, behavior: "smooth" })}><img src={slide.src} alt="" loading="lazy" /></button>)}</div>}
   </section>;
 }

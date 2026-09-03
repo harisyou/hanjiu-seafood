@@ -31,7 +31,7 @@ test('public detail uses anonymous client, explicit visibility, and server 404',
 });
 test('catalog-only homepage and persistent layout keep legacy purchase outside browsing cards',()=>{
   const shell=readFileSync(new URL('../components/storefront-shell.tsx',import.meta.url),'utf8');
-  const browsing=shell.slice(shell.indexOf('{isCatalog && <section className="content productBrowsingSection"'),shell.indexOf('{productId && <section'));
+  const browsing=shell.slice(shell.indexOf('{isCatalog && <section className="content productBrowsingSection"'),shell.indexOf('{productId &&'));
   assert.doesNotMatch(browsing,/addToCart\(|variantSelector|variantQuantity|processingPresetCards/);
   assert.match(browsing,/查看商品/);
   assert.match(shell,/if \(!isCatalog\) router.push\("\/#order"\)/);

@@ -713,7 +713,7 @@ export default function StorefrontShell({ children }: { children: React.ReactNod
 
   return (
     <main>
-      <header className="hero">
+      <header className={isCatalog ? "hero" : "hero catalogHeader"}>
   <nav>
     <Link href="/">韓九海鮮</Link>
       <button
@@ -742,7 +742,7 @@ export default function StorefrontShell({ children }: { children: React.ReactNod
   </picture>}
 </header>
       {children}
-      {isCatalog && <section className="content productBrowsingSection">
+      {isCatalog && <section className="content productBrowsingSection" id="catalog">
         <div className="heading productBrowsingHeading"><div><small>SEAFOOD CATALOG</small><h2>海鮮商品</h2></div><p>每個規格皆有獨立價格與限購數量，實際供應以頁面顯示為準。</p></div>
         <section className="productFilters" aria-label="商品搜尋與篩選">
           <label className="productSearchField">
@@ -754,6 +754,7 @@ export default function StorefrontShell({ children }: { children: React.ReactNod
             <div className="productCategoryChips" role="group" aria-label="商品分類">
               {storefrontCategories.map((category) => <button type="button" key={category.id} className={selectedProductCategory === category.id ? "isActive" : ""} aria-pressed={selectedProductCategory === category.id} onClick={() => setSelectedProductCategory(category.id)}>{category.name}</button>)}
             </div>
+            {storefrontCategories.length > 3 && <small className="categoryScrollHint">左右滑動查看更多分類 →</small>}
             <label className="stockOnlyToggle">
               <input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} />
               <span>只看有貨</span>
@@ -772,7 +773,7 @@ export default function StorefrontShell({ children }: { children: React.ReactNod
             return <article className="card catalogBrowseCard" key={product.id}>
               <div className="photo">{cover ? <img src={cover} alt={product.name} loading="lazy" /> : <span role="img" aria-label="尚無商品圖片">🐟</span>}</div>
               <div className="body"><small>{productCategories.find((category) => category.id === product.category_id)?.name}</small><h3>{product.name}</h3>
-                {summary.min !== null && <p className="catalogPrice">{formatPrice(summary.min)}{summary.max !== summary.min ? " 起" : ""}</p>}
+                <p className="catalogPrice">{summary.min !== null ? <>{formatPrice(summary.min)}{summary.max !== summary.min ? " 起" : ""}</> : <span aria-hidden="true">—</span>}</p>
                 <div className="catalogBadges">{summary.inStock && <span>現貨</span>}{summary.preorder && <span>可預訂</span>}{!summary.inStock && !summary.preorder && <span>暫無可購買規格</span>}</div>
                 <Link className="buttonLink" href={`/products/${product.id}`}>查看商品</Link>
               </div>
@@ -780,7 +781,7 @@ export default function StorefrontShell({ children }: { children: React.ReactNod
           })}
         </div>}
       </section>}
-      {productId && <section className="content legacyPurchaseSection" aria-label="商品購買"><h2>選擇規格與處理方式</h2>
+      {productId && products.some((product) => product.id === productId && product.status !== "hidden") && <section className="content legacyPurchaseSection" aria-label="商品購買"><h2>選擇規格與處理方式</h2>
         {catalogLoading ? <p role="status">購買資料載入中…</p> : catalogError ? <p role="alert">{catalogError}<button onClick={() => setCatalogRefresh((current) => current + 1)}>重新載入</button></p> : <div className="grid storefrontProductGrid">
           {products.filter((product) => product.id === productId).map((product) => {
             const productVariants = variants.filter((variant) => variant.product_id === product.id);
@@ -814,9 +815,9 @@ export default function StorefrontShell({ children }: { children: React.ReactNod
                   : cartActionStatus === "success"
                     ? "✓ 已加入購物車"
                     : "加入購物車";
-            return <article className={`card storefrontProductCard ${soldOut ? "isSoldOut" : "isAvailable"}`} key={product.id}>
-              <div className="photo">{product.image_url ? <img src={product.image_url} alt={product.name} loading="lazy" /> : <span aria-label="尚無商品圖片" role="img">🐟</span>}{product.featured && <div className="productCardBadges"><b>本日精選</b></div>}</div>
-              <div className="body"><div className="productCardIntro"><div><small>{soldOut ? "已售完" : "今日供應"}</small>{!soldOut && <span>{purchasableVariants.length} 個可購買規格</span>}<h3>{product.name}</h3></div></div><p className="productDescription">{product.description || "今日新鮮上架，規格與價格請見下方。"}</p><p className="productCooking">料理建議：{product.cooking || "歡迎詢問"}</p>
+            if (soldOut) return <article className="catalogSoldOut" key={product.id}><p role="status">目前暫無可購買規格</p><button type="button" disabled>已售完</button></article>;
+            return <article className="card storefrontProductCard isAvailable" key={product.id}>
+              <div className="body">
                 {displayVariants.length > 0 && <div className="variantSelector">
                   <label htmlFor={`variant-${product.id}`}>選擇規格</label>
                   <p className="variantSelectorHint">{selectedVariant ? "已依您選擇更新價格與可購買狀態。" : hasMultipleVariantPrices ? "不同規格有不同價格，請選擇後查看確切價格。" : "請選擇規格查看價格與可購買狀態。"}</p>

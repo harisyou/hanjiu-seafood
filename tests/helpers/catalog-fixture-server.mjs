@@ -1,17 +1,38 @@
-// Local-only read fixture. No Supabase connection, no production data, no writes.
+// Loopback-only fixture. No Supabase connection or production data.
+// Opt-in admin mode mutates disposable memory only, never Storage objects.
 import { createServer } from 'node:http';
 import { fixtures } from './catalog-fixtures.mjs';
 const data = fixtures();
-createServer((req,res)=>{
+const adminMode = process.env.CATALOG_FIXTURE_ADMIN === '1';
+const user = {id:'90000000-0000-4000-8000-000000000001',email:'fixture@example.test',role:'authenticated',aud:'authenticated'};
+createServer(async (req,res)=>{
   res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','*');
   if(req.method==='OPTIONS'){res.end();return;}
-  if(req.method!=='GET'){res.writeHead(403);res.end('Fixture is read-only');return;}
   const url = new URL(req.url,'http://127.0.0.1:54329');
-  if(url.pathname.startsWith('/image/')) { res.setHeader('Content-Type','image/svg+xml'); res.end(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600"><rect width="600" height="600" fill="${url.pathname.endsWith('0')?'#c9ded8':'#b5ccda'}"/><text x="200" y="300" font-size="50">Fish ${url.pathname.slice(-1)}</text></svg>`); return; }
+  const json = (value) => { res.setHeader('Content-Type','application/json'); res.end(JSON.stringify(value)); };
+  if(adminMode && url.pathname==='/auth/v1/token' && req.method==='POST') {
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const exp = Math.floor(Date.now()/1000)+3600;
+    json({access_token:`${encode({alg:'HS256',typ:'JWT'})}.${encode({...user,exp})}.fixture`,refresh_token:'local-fixture-only',token_type:'bearer',expires_in:3600,expires_at:exp,user}); return;
+  }
+  if(adminMode && url.pathname==='/auth/v1/user') {json(user);return;}
+  if(adminMode && url.pathname==='/rest/v1/rpc/is_hanjiu_admin' && req.method==='POST') {json(true);return;}
+  if(adminMode && url.pathname==='/rest/v1/rpc/admin_save_product_catalog' && req.method==='POST') {
+    let body=''; for await(const part of req) body+=part;
+    const input=JSON.parse(body), index=data.products.findIndex(p=>p.id===input.p_product_id);
+    if(index<0) {res.writeHead(404);json({message:'missing fixture product'});return;}
+    data.products[index]={...data.products[index],...input.p_content,updated_at:new Date().toISOString()};
+    data.product_images=[...data.product_images.filter(i=>i.product_id!==input.p_product_id),...input.p_images.map((i,sort_order)=>({...i,sort_order}))];
+    data.product_faqs=[...data.product_faqs.filter(i=>i.product_id!==input.p_product_id),...input.p_faqs.map((i,sort_order)=>({...i,sort_order}))];
+    data.products[index].image_url=input.p_images.find(i=>i.is_primary)?.legacy_url || null;
+    json(data.products[index]);return;
+  }
+  if(req.method!=='GET'){res.writeHead(403);res.end('Fixture is read-only');return;}
+  if(url.pathname.startsWith('/image/')) { const width=url.pathname.endsWith('0')?1600:600, height=1200; res.setHeader('Content-Type','image/svg+xml'); res.end(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="${url.pathname.endsWith('0')?'#c9ded8':'#b5ccda'}"/><ellipse cx="${width/2}" cy="600" rx="${width*.4}" ry="140" fill="#5d8f8b"/><text x="20" y="50" font-size="40">Full image ${url.pathname.slice(-1)}</text></svg>`); return; }
   const table = url.pathname.split('/').at(-1);
   let rows = structuredClone(data[table] || []);
   if(table==='products') rows=rows.filter(row=>row.status!=='hidden');
-  if(table==='product_faqs') rows=rows.filter(row=>row.active);
+  if(table==='product_faqs' && !adminMode) rows=rows.filter(row=>row.active);
   for(const [key,value] of url.searchParams){
     if(value.startsWith('eq.') && !key.includes('.')) rows=rows.filter(row=>String(row[key])===value.slice(3));
     if(value.startsWith('neq.')) rows=rows.filter(row=>String(row[key])!==value.slice(4));
@@ -20,4 +41,4 @@ createServer((req,res)=>{
   if(table==='product_processing_presets') rows=rows.map(row=>({...row,processing_presets:{name:'不處理',active:true}}));
   res.setHeader('Content-Type','application/json');
   res.end(JSON.stringify(req.headers.accept?.includes('vnd.pgrst.object') ? rows[0] || null : rows));
-}).listen(54329,'127.0.0.1',()=>console.log('Read-only catalog fixture on 127.0.0.1:54329'));
+}).listen(54329,'127.0.0.1',()=>console.log(`Catalog fixture on 127.0.0.1:54329 (${adminMode?'disposable admin memory':'read-only'})`));
