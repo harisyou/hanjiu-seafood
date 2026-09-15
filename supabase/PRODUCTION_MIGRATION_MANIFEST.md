@@ -3,10 +3,10 @@
 The canonical complete ordered list is
 [docs/production/MIGRATION_MANIFEST.md](../docs/production/MIGRATION_MANIFEST.md).
 For Phase 1 follow [F005-1 deployment](../docs/production/F005-1-CATALOG-DEPLOYMENT.md).
-Production has already applied F005-1 per owner verification. Its next required
-manual migration is `f005-1a-product-image-delete-lockdown.sql`, NOT a rerun of
-F005-1. Then run the updated `f005-1-product-catalog-verify.sql`; the reported
-`Allow authenticated delete` policy must fail verification until removed.
+The owner reported F005-1 and F005-1a as already applied during Phase 1 review;
+do not rerun either file. The next proposed, separately reviewed change is
+`f006-1-phase2-pr-a-database-foundation.sql`, **not yet applied or verified in
+Production by Codex**. See [Phase 2 PR-A review](../docs/production/F006-1-PR-A-REVIEW.md).
 The F004 checklist below is historical feature-specific guidance, not an instruction
 to rerun migrations or reset existing preorder values.
 
@@ -29,7 +29,9 @@ small operational baseline, not a replacement for the historical migration files
 6. Apply `f005-1-product-catalog.sql` manually before the Phase 1 app; see its
    dedicated execution/verification/forward-fix guide above.
 7. Apply `f005-1a-product-image-delete-lockdown.sql` after F005-1, then run the
-   updated catalog verification. For current Production, start with this step.
+   updated catalog verification. Historical step; owner reported it completed.
+8. Review `f006-1-phase2-pr-a-database-foundation.sql` for a target that has
+   completed steps 1–7. Do not treat this proposed migration as already deployed.
 
 ## F004-3.3 deployment checklist
 
