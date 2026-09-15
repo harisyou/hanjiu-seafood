@@ -47,6 +47,16 @@ in this order. Do not rerun historical migrations merely because they appear her
     forward fix for the independently named `Allow authenticated delete` Storage
     policy. Follow [Phase 1 deployment](F005-1-CATALOG-DEPLOYMENT.md), then run the
     updated `supabase/f005-1-product-catalog-verify.sql` (read-only assertions).
+30. `supabase/f006-1-phase2-pr-a-database-foundation.sql` — Phase 2 PR-A only.
+    **New, generated migration; not applied by Codex and not assumed applied in
+    Production.** Owner reviews the PR and prior baseline, then decides when to
+    run it manually. Before deployment, run the read-only
+    `supabase/f006-1-phase2-pr-a-preflight.sql`, resolve all BLOCKERs and save
+    its counts/fingerprints. After deployment, paste those baselines into the
+    read-only `supabase/f006-1-phase2-pr-a-post-verify.sql` and require all three
+    summaries to PASS. The original `supabase/f006-1-phase2-pr-a-verify.sql`
+    remains supplemental inspection.
+    See [Phase 2 PR-A review](F006-1-PR-A-REVIEW.md).
 
 ## Operator rules
 
