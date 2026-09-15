@@ -34,7 +34,8 @@ the migration and target baseline before deciding whether/when to apply it manua
 `products.inventory_mode` is nullable. NULL means existing legacy behaviour; no
 historical product is guessed or backfilled. Mode changes are guarded when either
 sellable/reserved weighted stock or positive active legacy variant inventory is
-present. Direct anon/authenticated mode edits are refused; future controlled admin
+present, or an unfinished in-stock legacy order still refers to the product.
+Direct anon/authenticated mode edits are refused; future controlled admin
 mode actions belong to PR-B.
 
 `phase2_weight_pricing_tiers` stores product-specific positive integer

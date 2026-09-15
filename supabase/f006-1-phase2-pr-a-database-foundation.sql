@@ -22,6 +22,11 @@ begin
              and v.active and v.inventory > 0) then
     raise exception 'inventory_mode_active_variant_stock';
   end if;
+  if exists (select 1 from public.order_items i join public.orders o on o.id = i.order_id
+             where i.product_id = old.id and i.supply_type = 'in_stock'
+               and o.status not in ('cancelled','completed')) then
+    raise exception 'inventory_mode_open_stock_order';
+  end if;
   new.updated_at := clock_timestamp();
   return new;
 end; $$;

@@ -15,7 +15,7 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
       create function public.is_hanjiu_admin() returns boolean language sql stable as $$select coalesce(current_setting('test.admin',true),'false')='true'$$;
       create table public.products(id uuid primary key,name text,status text,updated_at timestamptz default now());
       create table public.product_variants(id uuid primary key,product_id uuid references products(id),active boolean,inventory integer);
-      create table public.orders(id uuid primary key,checkout_idempotency_key uuid,checkout_request_fingerprint text);
+      create table public.orders(id uuid primary key,status text,checkout_idempotency_key uuid,checkout_request_fingerprint text);
       create unique index orders_checkout_idempotency_key_unique_idx on orders(checkout_idempotency_key) where checkout_idempotency_key is not null;
       create table public.order_items(id uuid primary key,order_id uuid references orders(id),product_id uuid references products(id),price integer,quantity integer,supply_type text,processing_preset_name text);
       create table public.inventory_movements(id uuid primary key,variant_id uuid,order_id uuid,inventory_delta integer,movement_type text);
@@ -23,7 +23,7 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
       create table public.order_payment_reversals(id uuid primary key,payment_id uuid,amount integer);
       create table public.product_images(id uuid primary key,product_id uuid references products(id));
       insert into products values('${product}','馬頭魚','available',now());
-      insert into orders values('30000000-0000-4000-8000-000000000001',null,null);
+      insert into orders values('30000000-0000-4000-8000-000000000001','completed',null,null);
       insert into order_items values('40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','${product}',499,1,'in_stock','不處理');
       insert into inventory_movements values('50000000-0000-4000-8000-000000000001',null,'30000000-0000-4000-8000-000000000001',-1,'checkout_sale');
       insert into order_payments values('60000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',499,1);
@@ -111,6 +111,10 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
     await db.exec(`update phase2_weighted_stock set batch_reference='B-1' where id='${stock.id}'`);
     assert.equal((await q(db,'select version from phase2_weighted_stock where id=$1',[stock.id]))[0].version,2);
     await assert.rejects(db.query('update products set inventory_mode=$1 where id=$2',['QUANTITY_VARIANT',product]),/inventory_mode_active_weighted_stock/);
+    await db.exec(`insert into products(id,name,status) values('10000000-0000-4000-8000-000000000002','legacy shrimp','available');
+      insert into orders values('30000000-0000-4000-8000-000000000002','new',null,null);
+      insert into order_items values('40000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002',600,1,'in_stock','不處理');`);
+    await assert.rejects(db.query("update products set inventory_mode='SINGLE_WEIGHTED' where id='10000000-0000-4000-8000-000000000002'"),/inventory_mode_open_stock_order/);
     await assert.rejects(db.query('delete from phase2_audit_events'),/phase2_audit_append_only/);
     await assert.rejects(db.query('delete from phase2_weighted_stock where id=$1',[stock.id]),/phase2_foundation_delete_not_allowed/);
     await assert.rejects(db.query('delete from phase2_freshness_days where day_offset=2'),/phase2_foundation_delete_not_allowed/);
