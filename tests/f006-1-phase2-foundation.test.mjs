@@ -94,17 +94,36 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
     assert.equal(await day(stock.id,'2026-09-12T16:00:00Z'),null); // T+3
     assert.equal(await day(stock.id,'2026-09-09T15:59:59Z'),null); // before fish date
     assert.equal(await day(manual.id,'2026-09-10T16:00:00Z'),949); // 999*.95 = 949.05
+    const freshnessVersion=async()=>(await q(db,'select version from phase2_freshness_policy where id=1'))[0].version;
+    const freshnessAudit=async(action)=>(await q(db,'select count(*)::integer n from phase2_audit_events where action=$1',[action]))[0].n;
+    assert.equal(await freshnessVersion(),1);
     await assert.rejects(db.query('update phase2_freshness_days set multiplier=0 where day_offset=1'),/check constraint/);
     await assert.rejects(db.query('update phase2_freshness_days set multiplier=1.01 where day_offset=1'),/check constraint/);
+    assert.equal(await freshnessVersion(),1);
+    const dayUpdatesBefore=await freshnessAudit('freshness_day_update');
+    const policyUpdatesBefore=await freshnessAudit('freshness_policy_update');
     await db.exec('update phase2_freshness_days set multiplier=0.9 where day_offset=1');
-    assert.equal(await day(stock.id,'2026-09-10T16:00:00Z'),270); // live policy edits affect unsold stock
+    assert.equal(await freshnessVersion(),2); // T+1 95% -> 90% advances global configuration
+    assert.equal(await day(stock.id,'2026-09-10T16:00:00Z'),270); // current price changes with version
+    assert.equal(await freshnessAudit('freshness_day_update'),dayUpdatesBefore+1);
+    assert.equal(await freshnessAudit('freshness_policy_update'),policyUpdatesBefore); // no duplicate audit
+    await db.exec('update phase2_freshness_days set multiplier=0.9 where day_offset=1');
+    assert.equal(await freshnessVersion(),2); // no-op is not a new configuration
+    assert.equal(await freshnessAudit('freshness_day_update'),dayUpdatesBefore+1);
     await db.exec('update phase2_freshness_policy set max_sale_day=1 where id=1');
-    assert.equal((await q(db,'select version from phase2_freshness_policy where id=1'))[0].version,2);
+    assert.equal(await freshnessVersion(),3);
+    assert.equal(await freshnessAudit('freshness_policy_update'),policyUpdatesBefore+1); // context restored
     assert.equal(await day(stock.id,'2026-09-11T16:00:00Z'),null);
     await assert.rejects(db.query('update phase2_freshness_policy set max_sale_day=-1 where id=1'),/check constraint/);
     await db.exec('update phase2_freshness_policy set max_sale_day=3 where id=1');
     assert.equal(await day(stock.id,'2026-09-12T16:00:00Z'),null); // missing T+3 policy day fails closed
+    const dayInsertsBefore=await freshnessAudit('freshness_day_insert');
+    const policyUpdatesBeforeInsert=await freshnessAudit('freshness_policy_update');
+    const versionBeforeInsert=await freshnessVersion();
     await db.exec("set app.phase2_reason='reviewed extended freshness day'; insert into phase2_freshness_days(day_offset,multiplier) values(3,0.8)");
+    assert.equal(await freshnessVersion(),versionBeforeInsert+1);
+    assert.equal(await freshnessAudit('freshness_day_insert'),dayInsertsBefore+1);
+    assert.equal(await freshnessAudit('freshness_policy_update'),policyUpdatesBeforeInsert);
     assert.equal(await day(stock.id,'2026-09-12T16:00:00Z'),240);
     await assert.rejects(db.query('update phase2_weighted_stock set stock_code=$1 where id=$2',['changed',stock.id]),/weighted_stock_action_or_correction_required/);
     await assert.rejects(db.query('update phase2_weighted_stock set status=$1 where id=$2',['sold',stock.id]),/weighted_stock_action_or_correction_required/);

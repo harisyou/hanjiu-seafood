@@ -229,6 +229,18 @@ returns trigger language plpgsql security definer set search_path = public, pg_t
 declare v_reason text := nullif(btrim(current_setting('app.phase2_reason',true)),'');
         v_entity_id uuid; v_entity_type text; v_action text;
 begin
+  -- A freshness-day edit advances the global version internally; its day audit
+  -- is the single business-change record, not a second policy-edit audit.
+  if tg_table_name = 'phase2_freshness_policy'
+     and current_setting('app.phase2_day_version_bump',true) = 'true' then
+    return new;
+  end if;
+  if tg_table_name = 'phase2_freshness_days' and tg_op = 'UPDATE' then
+    if new.day_offset = old.day_offset
+       and new.multiplier is not distinct from old.multiplier then
+      return new;
+    end if;
+  end if;
   if v_reason is null then raise exception 'phase2_change_reason_required'; end if;
   if tg_table_name = 'phase2_weight_pricing_tiers' then
     v_entity_id := new.id; v_entity_type := 'weight_pricing_tier'; v_action := 'pricing_tier_' || lower(tg_op);
@@ -251,6 +263,25 @@ create trigger phase2_policy_change_audit after update on public.phase2_freshnes
   for each row execute function public.phase2_audit_foundation_change();
 create trigger phase2_day_change_audit after insert or update on public.phase2_freshness_days
   for each row execute function public.phase2_audit_foundation_change();
+
+-- The policy touch trigger owns version increments. A day change invokes it
+-- once, without updating days from policy (no trigger cycle). Restore the
+-- transaction-local context before a later explicit policy edit can be audited.
+create or replace function public.phase2_advance_freshness_version_from_day()
+returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_prior text := current_setting('app.phase2_day_version_bump',true);
+begin
+  if tg_op = 'UPDATE' and new.day_offset = old.day_offset
+     and new.multiplier is not distinct from old.multiplier then
+    return new;
+  end if;
+  perform set_config('app.phase2_day_version_bump','true',true);
+  update public.phase2_freshness_policy set updated_at = clock_timestamp() where id = 1;
+  perform set_config('app.phase2_day_version_bump',coalesce(v_prior,''),true);
+  return new;
+end; $$;
+create trigger phase2_day_version_advance after insert or update on public.phase2_freshness_days
+  for each row execute function public.phase2_advance_freshness_version_from_day();
 
 -- Taiwan calendar days, not elapsed 24-hour intervals. Missing policy day fails closed.
 create or replace function public.phase2_current_weighted_stock_price(p_stock_id uuid, p_as_of timestamptz default now())
@@ -312,6 +343,7 @@ revoke all on function public.phase2_guard_inventory_mode(),public.phase2_guard_
   public.phase2_initialize_weighted_stock(),public.phase2_guard_weighted_stock_update(),
   public.phase2_audit_immutable(),public.phase2_audit_stock_insert(),
   public.phase2_audit_foundation_change(),public.phase2_touch_freshness_configuration(),
+  public.phase2_advance_freshness_version_from_day(),
   public.phase2_no_foundation_delete() from public,anon,authenticated;
 
 commit;

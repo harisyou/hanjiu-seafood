@@ -66,6 +66,10 @@ base and returns NULL for before-fish-day, missing policy day, non-sellable stat
 T+3 or beyond max day. Nothing mutates stock prices at midnight. Policy changes
 require a reason and append audit, affecting only later live quotations; order
 price snapshots remain the job of a later checkout PR.
+Changing a day multiplier or adding a day advances the same global freshness
+configuration version as editing `max_sale_day`. The day change writes one day
+audit record; the internal version advance does not create a duplicate policy
+audit. A no-op multiplier update advances neither version nor audit.
 
 `phase2_audit_events` is the minimal append-only actor/action/entity/old/new/reason/
 time foundation. Stock creation and tier/policy edits write facts automatically;
