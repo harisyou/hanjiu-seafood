@@ -137,6 +137,18 @@ Production was not substituted. `node node_modules/typescript/bin/tsc --noEmit`
 export, including its built-in type/lint phase and 14 static routes. The repo has
 no separate `lint` script, so no standalone lint command was run.
 
+Before manual Production execution, run the read-only
+`supabase/f006-1-phase2-pr-a-preflight.sql` catalog section and collect every
+BLOCKER. Do not apply F006-1 unless its SUMMARY is PASS. When all required legacy
+tables exist, save the exact eight row counts, inventory full-row/schema MD5,
+checkout unique-index MD5 and every protected function overload's definition
+MD5. The preflight performs no writes or business RPC calls. After owner-run
+deployment, run `supabase/f006-1-phase2-pr-a-post-verify.sql` read-only catalog,
+defaults and baseline sections. Paste the saved values into its explicitly NULL
+placeholders; do not guess or self-compare. CATALOG_SUMMARY, DEFAULTS_SUMMARY and
+BASELINE_SUMMARY must all be PASS. The earlier compact
+`supabase/f006-1-phase2-pr-a-verify.sql` remains supplemental inspection.
+
 Before manual Production execution, the owner should confirm F005-1a and the
 current F004-1 checkout signature/unique index, inspect existing RLS/grants and
 backup catalog/reference data. Apply F006-1 only once if approved. Run the

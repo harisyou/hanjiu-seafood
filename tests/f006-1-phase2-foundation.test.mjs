@@ -3,6 +3,8 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 const migration=readFileSync(new URL('../supabase/f006-1-phase2-pr-a-database-foundation.sql',import.meta.url),'utf8');
+const preflight=readFileSync(new URL('../supabase/f006-1-phase2-pr-a-preflight.sql',import.meta.url),'utf8');
+const postVerify=readFileSync(new URL('../supabase/f006-1-phase2-pr-a-post-verify.sql',import.meta.url),'utf8');
 const product='10000000-0000-4000-8000-000000000001';
 const tier='20000000-0000-4000-8000-000000000001';
 const q=(db,sql,params)=>db.query(sql,params).then(r=>r.rows);
@@ -33,7 +35,36 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
       (select row_to_json(x) from (select * from inventory_movements) x) movement,
       (select row_to_json(x) from (select * from order_payments) x) payment,
       (select row_to_json(x) from (select * from order_payment_reversals) x) reversal`);
+    const preflightResults=await db.exec(preflight);
+    assert.equal(preflightResults[0].rows.find(row=>row.check_name==='required_table:products').status,'PASS');
+    assert.equal(preflightResults[0].rows.find(row=>row.check_name==='canonical_checkout_7_arg').status,'BLOCKER');
+    assert.equal(preflightResults[0].rows.find(row=>row.check_name==='SUMMARY').status,'BLOCKER');
     await db.exec(migration);
+    const postResults=await db.exec(postVerify);
+    assert.deepEqual(postResults[0].rows.filter(row=>row.check_name.startsWith('phase2_')&&row.status==='BLOCKER'),[]);
+    assert.equal(postResults[0].rows.find(row=>row.check_name==='phase2_function:admin_create_weighted_stock(uuid,date,integer,text,uuid,integer,boolean)').status,'PASS');
+    assert.equal(postResults[0].rows.find(row=>row.check_name==='phase2_trigger:phase2_manual_price_policy_change_audit').status,'PASS');
+    assert.equal(postResults[0].rows.find(row=>row.check_name==='no_client_direct_write:phase2_manual_price_confirmation_policy').status,'PASS');
+    assert.equal(postResults[1].rows.find(row=>row.check_name==='DEFAULTS_SUMMARY').status,'PASS');
+    assert.equal(postResults[2].rows.find(row=>row.check_name==='BASELINE_SUMMARY').status,'BLOCKER');
+    // Disposable DB proof that copied preflight values, not self-comparison,
+    // make unchanged protected facts pass after the migration.
+    let filledPost=postVerify;
+    for (const row of preflightResults[4].rows) {
+      filledPost=filledPost.replace(`('${row.entity}',null::bigint)`,
+        `('${row.entity}',${row.row_count}::bigint)`);
+    }
+    const quoted=value=>`'${String(value).replaceAll("'","''")}'`;
+    filledPost=filledPost.replace('(null::text,null::text)',
+      preflightResults[1].rows.map(row=>`(${quoted(row.function_key)},${quoted(row.definition_md5)})`).join(','));
+    filledPost=filledPost.replace('from (values (null::text)) v(before_rows_md5)',
+      `from (values (${quoted(preflightResults[5].rows[0].rows_md5)})) v(before_rows_md5)`);
+    filledPost=filledPost.replace('from (values (null::text)) v(before_schema_md5)',
+      `from (values (${quoted(preflightResults[2].rows[0].schema_md5)})) v(before_schema_md5)`);
+    filledPost=filledPost.replace('from (values (null::text)) v(before_index_md5)',
+      `from (values (${quoted(preflightResults[3].rows[0].index_definition_md5)})) v(before_index_md5)`);
+    const filledResults=await db.exec(filledPost);
+    assert.equal(filledResults[2].rows.find(row=>row.check_name==='BASELINE_SUMMARY').status,'PASS');
     const after=await q(db,`select (select row_to_json(x) from (select * from orders) x) orders,
       (select row_to_json(x) from (select * from order_items) x) item,
       (select row_to_json(x) from (select * from inventory_movements) x) movement,
@@ -218,4 +249,20 @@ test('foundation migration never replaces F004-1 checkout or rewrites ledger/pay
   assert.doesNotMatch(migration,/create\s+or\s+replace\s+function\s+public\.create_checkout_order|alter\s+table\s+public\.(orders|order_items|inventory_movements|order_payments|order_payment_reversals)/i);
   assert.match(migration,/inventory_mode text/);
   assert.match(migration,/phase2_audit_events/);
+});
+
+test('F006-1 preflight and post verification files contain only read-only statements',()=>{
+  for (const sql of [preflight,postVerify]) {
+    const executable=sql.replace(/--[^\n]*/g,'').replace(/'(?:''|[^'])*'/g,"''");
+    assert.doesNotMatch(executable,/\b(create|alter|drop|insert|update|delete|truncate|grant|revoke|do|call)\b/i);
+    assert.ok(executable.split(';').every(statement=>!statement.trim()||/^(with|select)\b/i.test(statement.trim())));
+  }
+  for (const [,name] of migration.matchAll(/^create trigger\s+(\w+)/gmi)) {
+    assert.match(preflight,new RegExp(`\\('${name}'\\)`));
+    assert.match(postVerify,new RegExp(`'${name}'`));
+  }
+  for (const [,name] of migration.matchAll(/^create (?:or replace )?function public\.(\w+)/gmi)) {
+    assert.match(preflight,new RegExp(`'${name}'`));
+    assert.match(postVerify,new RegExp(name));
+  }
 });

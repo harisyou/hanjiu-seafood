@@ -7,6 +7,9 @@ The owner reported F005-1 and F005-1a as already applied during Phase 1 review;
 do not rerun either file. The next proposed, separately reviewed change is
 `f006-1-phase2-pr-a-database-foundation.sql`, **not yet applied or verified in
 Production by Codex**. See [Phase 2 PR-A review](../docs/production/F006-1-PR-A-REVIEW.md).
+Run `f006-1-phase2-pr-a-preflight.sql` read-only before owner deployment; save
+its baseline counts/fingerprints. Compare them afterward with the read-only
+`f006-1-phase2-pr-a-post-verify.sql`, supplying the saved values explicitly.
 The F004 checklist below is historical feature-specific guidance, not an instruction
 to rerun migrations or reset existing preorder values.
 
