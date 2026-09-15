@@ -54,10 +54,14 @@ begin
   end if;
   perform 1 from public.products where id = new.product_id for update;
   if not found then raise exception 'product_not_found'; end if;
-  if exists (select 1 from public.phase2_weight_pricing_tiers t
-             where t.product_id = new.product_id and t.id <> new.id
-               and t.lower_bound_g < new.upper_bound_g and new.lower_bound_g < t.upper_bound_g) then
-    raise exception 'weight_pricing_tier_overlap';
+  -- Disabled tiers are retained history, not effective price intervals. Turning
+  -- one back on runs this same check against every other enabled interval.
+  if new.enabled then
+    if exists (select 1 from public.phase2_weight_pricing_tiers t
+               where t.product_id = new.product_id and t.id <> new.id and t.enabled
+                 and t.lower_bound_g < new.upper_bound_g and new.lower_bound_g < t.upper_bound_g) then
+      raise exception 'weight_pricing_tier_overlap';
+    end if;
   end if;
   if tg_op = 'UPDATE' then new.updated_at := clock_timestamp(); end if;
   return new;

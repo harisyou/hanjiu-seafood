@@ -40,8 +40,10 @@ mode actions belong to PR-B.
 
 `phase2_weight_pricing_tiers` stores product-specific positive integer
 `price_per_jin`, enabled flag, order and half-open integer gram bounds. A trigger
-serializes tier edits on the parent product and rejects overlap even for disabled
-tiers; gaps remain valid and yield no price. Tier deletion is blocked; edits never
+serializes tier edits on the parent product and rejects overlap only among enabled
+tiers. Disabled tiers may overlap, but re-enabling one revalidates its bounds against
+all other enabled tiers. Gaps remain valid and yield no price. Tier deletion is
+blocked; edits never
 reprice already-created stock. Changes require a reason and append an audit event.
 
 `phase2_weighted_stock` stores one UUID per physical fish, pre-processing

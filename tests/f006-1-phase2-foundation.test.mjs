@@ -87,8 +87,23 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
     assert.deepEqual(originalSnapshot,{system_base_price:300,price_per_jin_snapshot:600,t0_base_price:300});
     const newer=(await q(db,'insert into phase2_weighted_stock(product_id,fish_date,raw_weight_g) values($1,$2,300) returning *',[product,'2026-09-10']))[0];
     assert.equal(newer.system_base_price,600);
+    await db.exec(`set app.phase2_reason='retire old tier'; update phase2_weight_pricing_tiers set enabled=false where id='${tier}'`);
+    const replacement=(await q(db,'insert into phase2_weight_pricing_tiers(product_id,lower_bound_g,upper_bound_g,price_per_jin) values($1,200,400,900) returning id',[product]))[0];
+    assert.ok(replacement.id); // same bounds as disabled old tier are allowed
+    const disabled=(await q(db,'insert into phase2_weight_pricing_tiers(product_id,lower_bound_g,upper_bound_g,price_per_jin,enabled) values($1,200,400,700,false) returning id',[product]))[0];
+    await db.exec(`update phase2_weight_pricing_tiers set lower_bound_g=210,upper_bound_g=390 where id='${disabled.id}'`); // disabled update may overlap
+    await assert.rejects(db.query('update phase2_weight_pricing_tiers set enabled=true where id=$1',[tier]),/weight_pricing_tier_overlap/);
+    assert.equal((await q(db,'select enabled from phase2_weight_pricing_tiers where id=$1',[tier]))[0].enabled,false);
+    const replacementStock=(await q(db,'insert into phase2_weighted_stock(product_id,fish_date,raw_weight_g) values($1,$2,300) returning *',[product,'2026-09-10']))[0];
+    assert.equal(replacementStock.system_base_price,450);
+    assert.equal(replacementStock.pricing_tier_id,replacement.id);
+    assert.deepEqual((await q(db,'select system_base_price,price_per_jin_snapshot,t0_base_price from phase2_weighted_stock where id=$1',[stock.id]))[0],originalSnapshot);
+    assert.deepEqual((await q(db,'select system_base_price,price_per_jin_snapshot,t0_base_price from phase2_weighted_stock where id=$1',[newer.id]))[0],
+      {system_base_price:600,price_per_jin_snapshot:1200,t0_base_price:600});
     const day=async(id,stamp)=>(await q(db,'select phase2_current_weighted_stock_price($1,$2) price',[id,stamp]))[0].price;
     assert.equal(await day(stock.id,'2026-09-10T15:59:59Z'),300); // Taiwan 23:59 T+0
+    assert.equal(await day(newer.id,'2026-09-10T15:59:59Z'),600); // disabled old tier did not reprice stock
+    assert.equal(await day(replacementStock.id,'2026-09-10T15:59:59Z'),450);
     assert.equal(await day(stock.id,'2026-09-10T16:00:00Z'),285); // Taiwan 00:00 T+1
     assert.equal(await day(stock.id,'2026-09-11T16:00:00Z'),270); // T+2
     assert.equal(await day(stock.id,'2026-09-12T16:00:00Z'),null); // T+3
@@ -138,9 +153,9 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
     await assert.rejects(db.query('delete from phase2_weighted_stock where id=$1',[stock.id]),/phase2_foundation_delete_not_allowed/);
     await assert.rejects(db.query('delete from phase2_freshness_days where day_offset=2'),/phase2_foundation_delete_not_allowed/);
     const audit=await q(db,"select action,reason,old_value,new_value from phase2_audit_events where action='pricing_tier_update'");
-    assert.equal(audit.length,2);
-    assert.equal(audit.at(-1).reason,'reviewed tier correction');
-    assert.equal(audit.at(-1).old_value.price_per_jin,601);assert.equal(audit.at(-1).new_value.price_per_jin,1200);
+    const correction=audit.find(row=>row.reason==='reviewed tier correction');
+    assert.ok(correction);
+    assert.equal(correction.old_value.price_per_jin,601);assert.equal(correction.new_value.price_per_jin,1200);
     assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where action like 'freshness_%_update'"))[0].n,3);
     await db.exec('set role anon');
     await assert.rejects(db.query('select * from phase2_weighted_stock'),/permission denied/);
