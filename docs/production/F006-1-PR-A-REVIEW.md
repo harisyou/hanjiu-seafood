@@ -60,6 +60,22 @@ RPCs must append audit records and check `version` rather than rewriting history
 The narrow admin creation RPC does not accept client-supplied status/code/system
 price. Order links are structural only: **this PR does not claim checkout stock**.
 
+Manual T+0 overrides are checked centrally by
+`phase2_manual_price_requires_confirmation(system_base_price,manual_base_price)`
+after the system price has been calculated in the stock creation trigger. The
+singleton `phase2_manual_price_confirmation_policy.max_unconfirmed_deviation_ratio`
+is **NULL by default**: PR-A does not invent or enforce an unapproved percentage,
+so existing positive overrides still work. The helper compares absolute deviation
+relative to the system base price only when a ratio is configured. The admin
+creation RPC accepts an explicit `p_confirm_manual_price` (default false), and
+the immutable stock row/audit snapshot records `manual_price_confirmed`. With a
+configured ratio, a deviation beyond it is rejected by the database unless that
+confirmation is true; frontend-only confirmation cannot bypass the trigger.
+PR-B must obtain owner approval of the business threshold and boundary semantics,
+add an audited/admin-controlled policy configuration action and a review/confirm
+UI that displays both prices and passes the explicit RPC flag. Until that policy
+is configured, PR-A makes no claim that abnormal-price confirmation is active.
+
 `phase2_freshness_policy` has one global `max_sale_day` (default 2) and version;
 `phase2_freshness_days` starts with 1.00/0.95/0.90 for T+0/1/2. Multipliers are
 strictly >0 and <=1. The read helper calculates the Asia/Taipei calendar-day
@@ -82,7 +98,7 @@ append new events in PR-B/C/D; no general admin dropdown is enabled here.
 
 ## Security and compatibility
 
-RLS is enabled on all five new tables. Authenticated admins can SELECT via the
+RLS is enabled on all six new tables. Authenticated admins can SELECT via the
 existing trusted helper; ordinary customers/anon cannot read stock/admin policy.
 Neither anon nor authenticated has direct INSERT/UPDATE/DELETE privileges on new
 tables or the stock-code sequence. `admin_create_weighted_stock` is the only new
@@ -100,7 +116,8 @@ not claim to represent old variant movements as physical fish stock.
 The PGlite test uses the existing repository DB test library with a disposable
 minimal migration fixture, including representative legacy order/payment/ledger
 facts before and after. It tests half-open bounds, overlap, gaps, prices/rounding,
-manual base validation, tier snapshot immutability, Taiwan midnight T+N, live
+manual base validation and configured confirmation (test-only ratio, not a
+Production threshold), tier snapshot immutability, Taiwan midnight T+N, live
 policy edits, max day, audit/immutability, mode guard, admin/anon privileges.
 This is **not** a complete replay of all historical Supabase migrations or a live
 Storage/Auth test. Existing checkout/ledger/payment suites remain the separate

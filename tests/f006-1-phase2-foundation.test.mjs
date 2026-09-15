@@ -141,6 +141,7 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
     assert.equal(await freshnessAudit('freshness_policy_update'),policyUpdatesBeforeInsert);
     assert.equal(await day(stock.id,'2026-09-12T16:00:00Z'),240);
     await assert.rejects(db.query('update phase2_weighted_stock set stock_code=$1 where id=$2',['changed',stock.id]),/weighted_stock_action_or_correction_required/);
+    await assert.rejects(db.query('update phase2_weighted_stock set manual_price_confirmed=true where id=$1',[stock.id]),/weighted_stock_action_or_correction_required/);
     await assert.rejects(db.query('update phase2_weighted_stock set status=$1 where id=$2',['sold',stock.id]),/weighted_stock_action_or_correction_required/);
     await db.exec(`update phase2_weighted_stock set batch_reference='B-1' where id='${stock.id}'`);
     assert.equal((await q(db,'select version from phase2_weighted_stock where id=$1',[stock.id]))[0].version,2);
@@ -157,10 +158,17 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
     assert.ok(correction);
     assert.equal(correction.old_value.price_per_jin,601);assert.equal(correction.new_value.price_per_jin,1200);
     assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where action like 'freshness_%_update'"))[0].n,3);
+    // Test-only configured ratio; PR-A deliberately ships NULL, not a business threshold.
+    assert.equal((await q(db,'select max_unconfirmed_deviation_ratio from phase2_manual_price_confirmation_policy where id=1'))[0].max_unconfirmed_deviation_ratio,null);
+    await db.exec('update phase2_manual_price_confirmation_policy set max_unconfirmed_deviation_ratio=0.5 where id=1');
+    assert.equal((await q(db,'select phase2_manual_price_requires_confirmation(450,460) required'))[0].required,false);
+    assert.equal((await q(db,'select phase2_manual_price_requires_confirmation(450,999) required'))[0].required,true);
+    assert.equal((await q(db,'select phase2_manual_price_requires_confirmation(450,null) required'))[0].required,false);
     await db.exec('set role anon');
     await assert.rejects(db.query('select * from phase2_weighted_stock'),/permission denied/);
     await assert.rejects(db.query('insert into phase2_weighted_stock(product_id,fish_date,raw_weight_g) values($1,$2,300)',[product,'2026-09-10']),/permission denied/);
     await assert.rejects(db.query('select * from phase2_audit_events'),/permission denied/);
+    await assert.rejects(db.query('select phase2_manual_price_requires_confirmation(450,999)'),/permission denied/);
     await db.exec('reset role; set role authenticated');
     assert.equal((await q(db,'select * from phase2_weighted_stock')).length,0);
     await assert.rejects(db.query('select admin_create_weighted_stock($1,$2,$3)',[product,'2026-09-10',300]),/admin_required/);
@@ -168,7 +176,22 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
     await db.exec("reset role; set test.admin='true'; set role authenticated");
     assert.ok((await q(db,'select * from phase2_weighted_stock')).length>0);
     await assert.rejects(db.query('insert into phase2_weighted_stock(product_id,fish_date,raw_weight_g) values($1,$2,300)',[product,'2026-09-10']),/permission denied/);
+    await assert.rejects(db.query('update phase2_manual_price_confirmation_policy set max_unconfirmed_deviation_ratio=0'),/permission denied/);
     assert.ok((await q(db,'select admin_create_weighted_stock($1,$2,$3)',[product,'2026-09-10',300])).length===1);
+    const stockCountBefore=(await q(db,'select count(*)::integer n from phase2_weighted_stock'))[0].n;
+    const auditCountBefore=(await q(db,"select count(*)::integer n from phase2_audit_events where action='stock_created'"))[0].n;
+    await assert.rejects(db.query('select admin_create_weighted_stock($1,$2,$3,null,null,$4,false)',[product,'2026-09-10',300,999]),/manual_price_confirmation_required/);
+    assert.equal((await q(db,'select count(*)::integer n from phase2_weighted_stock'))[0].n,stockCountBefore);
+    assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where action='stock_created'"))[0].n,auditCountBefore);
+    const normal=(await q(db,'with created as materialized (select admin_create_weighted_stock($1,$2,$3,null,null,$4,false) stock) select (stock).* from created',[product,'2026-09-10',300,460]))[0];
+    assert.equal(normal.system_base_price,450);
+    assert.equal(normal.t0_base_price,460);
+    assert.equal(normal.manual_price_confirmed,false);
+    const confirmed=(await q(db,'with created as materialized (select admin_create_weighted_stock($1,$2,$3,null,null,$4,true) stock) select (stock).* from created',[product,'2026-09-10',300,999]))[0];
+    assert.equal(confirmed.t0_base_price,999);
+    assert.equal(confirmed.manual_price_confirmed,true);
+    assert.equal((await q(db,'select count(*)::integer n from phase2_weighted_stock'))[0].n,stockCountBefore+2);
+    assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where action='stock_created'"))[0].n,auditCountBefore+2);
   } finally {await db.close();}
 });
 

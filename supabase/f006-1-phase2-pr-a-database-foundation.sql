@@ -96,6 +96,35 @@ create trigger phase2_policy_touch before update on public.phase2_freshness_poli
 create trigger phase2_day_touch before update on public.phase2_freshness_days
   for each row execute function public.phase2_touch_freshness_configuration();
 
+-- No business deviation threshold has been approved for PR-A. NULL preserves
+-- existing manual overrides; PR-B must configure this through an audited admin
+-- action before abnormal-price confirmation becomes mandatory.
+create table public.phase2_manual_price_confirmation_policy (
+  id smallint primary key check (id = 1),
+  max_unconfirmed_deviation_ratio numeric(12,6)
+    check (max_unconfirmed_deviation_ratio is null or max_unconfirmed_deviation_ratio >= 0),
+  updated_at timestamptz not null default now()
+);
+insert into public.phase2_manual_price_confirmation_policy(id,max_unconfirmed_deviation_ratio)
+values (1,null);
+
+create or replace function public.phase2_manual_price_requires_confirmation(
+  p_system_base_price integer,p_manual_base_price integer)
+returns boolean language plpgsql stable security definer set search_path = public, pg_temp as $$
+declare v_limit numeric;
+begin
+  if p_manual_base_price is null then return false; end if;
+  if p_system_base_price is null or p_system_base_price <= 0 then
+    raise exception 'invalid_system_base_price';
+  end if;
+  if p_manual_base_price <= 0 then raise exception 'invalid_manual_base_price'; end if;
+  select max_unconfirmed_deviation_ratio into v_limit
+  from public.phase2_manual_price_confirmation_policy where id = 1;
+  if not found then raise exception 'manual_price_confirmation_policy_missing'; end if;
+  return v_limit is not null
+     and abs(p_manual_base_price::numeric - p_system_base_price) / p_system_base_price > v_limit;
+end; $$;
+
 -- Existing F003 inventory_movements remains the quantity-variant history ledger.
 -- This new stock table is a different physical-unit model, not a backfill of variants.
 create sequence public.phase2_stock_code_seq;
@@ -115,6 +144,7 @@ create table public.phase2_weighted_stock (
   price_per_jin_snapshot integer not null check (price_per_jin_snapshot > 0),
   system_base_price integer not null check (system_base_price > 0),
   manual_base_price integer check (manual_base_price is null or manual_base_price > 0),
+  manual_price_confirmed boolean not null default false,
   t0_base_price integer not null check (t0_base_price > 0),
   version integer not null default 1 check (version > 0),
   created_at timestamptz not null default now(),
@@ -151,6 +181,13 @@ begin
   -- numeric round() is half-away-from-zero. All inputs are positive, matching TS Math.round().
   new.system_base_price := round(new.raw_weight_g::numeric * v_tier.price_per_jin / 600)::integer;
   if new.system_base_price <= 0 then raise exception 'computed_base_price_too_small'; end if;
+  if new.manual_base_price is null and new.manual_price_confirmed then
+    raise exception 'manual_price_confirmation_without_override';
+  end if;
+  if public.phase2_manual_price_requires_confirmation(new.system_base_price,new.manual_base_price)
+     and not new.manual_price_confirmed then
+    raise exception 'manual_price_confirmation_required';
+  end if;
   new.t0_base_price := coalesce(new.manual_base_price,new.system_base_price);
   new.version := 1;
   return new;
@@ -167,6 +204,7 @@ begin
      or new.price_per_jin_snapshot is distinct from old.price_per_jin_snapshot
      or new.system_base_price is distinct from old.system_base_price
      or new.manual_base_price is distinct from old.manual_base_price
+     or new.manual_price_confirmed is distinct from old.manual_price_confirmed
      or new.t0_base_price is distinct from old.t0_base_price
      or new.status is distinct from old.status or new.order_id is distinct from old.order_id
      or new.order_item_id is distinct from old.order_item_id then
@@ -192,6 +230,8 @@ create trigger phase2_tier_no_delete before delete on public.phase2_weight_prici
 create trigger phase2_policy_no_delete before delete on public.phase2_freshness_policy
   for each row execute function public.phase2_no_foundation_delete();
 create trigger phase2_days_no_delete before delete on public.phase2_freshness_days
+  for each row execute function public.phase2_no_foundation_delete();
+create trigger phase2_manual_price_policy_no_delete before delete on public.phase2_manual_price_confirmation_policy
   for each row execute function public.phase2_no_foundation_delete();
 create trigger phase2_inventory_mode_guard before update of inventory_mode on public.products
   for each row execute function public.phase2_guard_inventory_mode();
@@ -307,16 +347,21 @@ $$;
 alter table public.phase2_weight_pricing_tiers enable row level security;
 alter table public.phase2_freshness_policy enable row level security;
 alter table public.phase2_freshness_days enable row level security;
+alter table public.phase2_manual_price_confirmation_policy enable row level security;
 alter table public.phase2_weighted_stock enable row level security;
 alter table public.phase2_audit_events enable row level security;
 create policy phase2_admin_tiers_read on public.phase2_weight_pricing_tiers for select to authenticated using ((select public.is_hanjiu_admin()));
 create policy phase2_admin_policy_read on public.phase2_freshness_policy for select to authenticated using ((select public.is_hanjiu_admin()));
 create policy phase2_admin_days_read on public.phase2_freshness_days for select to authenticated using ((select public.is_hanjiu_admin()));
+create policy phase2_admin_manual_price_policy_read on public.phase2_manual_price_confirmation_policy
+  for select to authenticated using ((select public.is_hanjiu_admin()));
 create policy phase2_admin_stock_read on public.phase2_weighted_stock for select to authenticated using ((select public.is_hanjiu_admin()));
 create policy phase2_admin_audit_read on public.phase2_audit_events for select to authenticated using ((select public.is_hanjiu_admin()));
 revoke all on public.phase2_weight_pricing_tiers,public.phase2_freshness_policy,public.phase2_freshness_days,
+  public.phase2_manual_price_confirmation_policy,
   public.phase2_weighted_stock,public.phase2_audit_events from public,anon,authenticated;
 grant select on public.phase2_weight_pricing_tiers,public.phase2_freshness_policy,public.phase2_freshness_days,
+  public.phase2_manual_price_confirmation_policy,
   public.phase2_weighted_stock,public.phase2_audit_events to authenticated;
 revoke all on sequence public.phase2_stock_code_seq from public,anon,authenticated;
 revoke all on function public.phase2_current_weighted_stock_price(uuid,timestamptz) from public,anon,authenticated;
@@ -325,7 +370,8 @@ grant execute on function public.phase2_current_weighted_stock_price(uuid,timest
 -- This narrow creation RPC supplies snapshots through the DB trigger; no arbitrary price/status input.
 create or replace function public.admin_create_weighted_stock(
   p_product_id uuid,p_fish_date date,p_raw_weight_g integer,p_batch_reference text default null,
-  p_representative_image_id uuid default null,p_manual_base_price integer default null)
+  p_representative_image_id uuid default null,p_manual_base_price integer default null,
+  p_confirm_manual_price boolean default false)
 returns public.phase2_weighted_stock language plpgsql security definer set search_path = public, pg_temp as $$
 declare v_stock public.phase2_weighted_stock;
 begin
@@ -334,13 +380,15 @@ begin
   if p_representative_image_id is not null and not exists
      (select 1 from public.product_images where id = p_representative_image_id and product_id = p_product_id)
      then raise exception 'representative_image_product_mismatch'; end if;
-  insert into public.phase2_weighted_stock(product_id,fish_date,raw_weight_g,batch_reference,representative_image_id,manual_base_price)
-  values(p_product_id,p_fish_date,p_raw_weight_g,p_batch_reference,p_representative_image_id,p_manual_base_price)
+  if p_confirm_manual_price is null then raise exception 'manual_price_confirmation_required'; end if;
+  insert into public.phase2_weighted_stock(product_id,fish_date,raw_weight_g,batch_reference,representative_image_id,manual_base_price,manual_price_confirmed)
+  values(p_product_id,p_fish_date,p_raw_weight_g,p_batch_reference,p_representative_image_id,p_manual_base_price,p_confirm_manual_price)
   returning * into v_stock;
   return v_stock;
 end; $$;
-revoke all on function public.admin_create_weighted_stock(uuid,date,integer,text,uuid,integer) from public,anon,authenticated;
-grant execute on function public.admin_create_weighted_stock(uuid,date,integer,text,uuid,integer) to authenticated;
+revoke all on function public.admin_create_weighted_stock(uuid,date,integer,text,uuid,integer,boolean) from public,anon,authenticated;
+grant execute on function public.admin_create_weighted_stock(uuid,date,integer,text,uuid,integer,boolean) to authenticated;
+revoke all on function public.phase2_manual_price_requires_confirmation(integer,integer) from public,anon,authenticated;
 
 -- Trigger helpers are not RPC endpoints.
 revoke all on function public.phase2_guard_inventory_mode(),public.phase2_guard_tier_overlap(),

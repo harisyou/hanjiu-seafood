@@ -8,13 +8,14 @@ select table_name,column_name,data_type,is_nullable
 from information_schema.columns
 where table_schema='public' and table_name in
   ('phase2_weight_pricing_tiers','phase2_weighted_stock','phase2_freshness_policy',
-   'phase2_freshness_days','phase2_audit_events')
+   'phase2_freshness_days','phase2_manual_price_confirmation_policy','phase2_audit_events')
 order by table_name,ordinal_position;
 
 select p.proname,pg_get_function_identity_arguments(p.oid) arguments,p.prosecdef
 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
 where n.nspname='public' and p.proname in
-  ('create_checkout_order','admin_create_weighted_stock','phase2_current_weighted_stock_price')
+  ('create_checkout_order','admin_create_weighted_stock','phase2_current_weighted_stock_price',
+   'phase2_manual_price_requires_confirmation')
 order by p.proname,arguments;
 
 select policyname,tablename,roles,cmd,qual,with_check
@@ -35,3 +36,5 @@ select (select count(*) from public.orders) orders,
 
 select id,max_sale_day,version from public.phase2_freshness_policy;
 select day_offset,multiplier from public.phase2_freshness_days order by day_offset;
+select id,max_unconfirmed_deviation_ratio
+from public.phase2_manual_price_confirmation_policy;
