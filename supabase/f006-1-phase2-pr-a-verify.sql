@@ -38,3 +38,9 @@ select id,max_sale_day,version from public.phase2_freshness_policy;
 select day_offset,multiplier from public.phase2_freshness_days order by day_offset;
 select id,max_unconfirmed_deviation_ratio
 from public.phase2_manual_price_confirmation_policy;
+
+select t.tgname,t.tgenabled
+from pg_trigger t join pg_class c on c.oid=t.tgrelid
+join pg_namespace n on n.oid=c.relnamespace
+where n.nspname='public' and c.relname='phase2_manual_price_confirmation_policy'
+  and t.tgname='phase2_manual_price_policy_change_audit';

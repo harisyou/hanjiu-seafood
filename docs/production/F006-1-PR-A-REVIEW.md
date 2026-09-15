@@ -71,9 +71,13 @@ creation RPC accepts an explicit `p_confirm_manual_price` (default false), and
 the immutable stock row/audit snapshot records `manual_price_confirmed`. With a
 configured ratio, a deviation beyond it is rejected by the database unless that
 confirmation is true; frontend-only confirmation cannot bypass the trigger.
-PR-B must obtain owner approval of the business threshold and boundary semantics,
-add an audited/admin-controlled policy configuration action and a review/confirm
-UI that displays both prices and passes the explicit RPC flag. Until that policy
+Actual changes to the ratio already require a nonblank reason and append one
+`manual_price_policy_update` event with actor, old/new row values, reason and
+timestamp; same-value updates create no event. Browser/authenticated roles cannot
+write the policy directly. PR-B must obtain owner approval of the business
+threshold and boundary semantics, add a controlled admin action/RPC that passes
+the reason to this database Audit trigger, and build a review/confirm UI that
+displays both prices and passes the explicit RPC flag. Until that policy
 is configured, PR-A makes no claim that abnormal-price confirmation is active.
 
 `phase2_freshness_policy` has one global `max_sale_day` (default 2) and version;
@@ -90,7 +94,8 @@ audit record; the internal version advance does not create a duplicate policy
 audit. A no-op multiplier update advances neither version nor audit.
 
 `phase2_audit_events` is the minimal append-only actor/action/entity/old/new/reason/
-time foundation. Stock creation and tier/policy edits write facts automatically;
+time foundation. Stock creation, tier/freshness edits and manual-price policy
+changes write facts automatically;
 unrelated historical audit/payment/ledger rows are untouched. Direct browser
 inserts and updates/deletes are denied. Future weight/date/manual-price/status,
 external-sale, batch and payment-decision actions will use controlled RPCs and
@@ -118,7 +123,8 @@ minimal migration fixture, including representative legacy order/payment/ledger
 facts before and after. It tests half-open bounds, overlap, gaps, prices/rounding,
 manual base validation and configured confirmation (test-only ratio, not a
 Production threshold), tier snapshot immutability, Taiwan midnight T+N, live
-policy edits, max day, audit/immutability, mode guard, admin/anon privileges.
+policy edits, max day, reason-required manual-policy Audit/no-op, audit
+immutability, mode guard, admin/anon privileges.
 This is **not** a complete replay of all historical Supabase migrations or a live
 Storage/Auth test. Existing checkout/ledger/payment suites remain the separate
 contract regression checks.

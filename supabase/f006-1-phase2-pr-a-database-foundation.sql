@@ -285,12 +285,20 @@ begin
       return new;
     end if;
   end if;
+  if tg_table_name = 'phase2_manual_price_confirmation_policy' then
+    if new.max_unconfirmed_deviation_ratio is not distinct from old.max_unconfirmed_deviation_ratio then
+      return new;
+    end if;
+  end if;
   if v_reason is null then raise exception 'phase2_change_reason_required'; end if;
   if tg_table_name = 'phase2_weight_pricing_tiers' then
     v_entity_id := new.id; v_entity_type := 'weight_pricing_tier'; v_action := 'pricing_tier_' || lower(tg_op);
   elsif tg_table_name = 'phase2_freshness_policy' then
     v_entity_id := '00000000-0000-4000-8000-000000000001'::uuid;
     v_entity_type := 'freshness_policy'; v_action := 'freshness_policy_' || lower(tg_op);
+  elsif tg_table_name = 'phase2_manual_price_confirmation_policy' then
+    v_entity_id := '00000000-0000-4000-8001-000000000001'::uuid;
+    v_entity_type := 'manual_price_confirmation_policy'; v_action := 'manual_price_policy_' || lower(tg_op);
   else
     v_entity_id := ('00000000-0000-4000-8000-' || lpad(new.day_offset::text,12,'0'))::uuid;
     v_entity_type := 'freshness_day'; v_action := 'freshness_day_' || lower(tg_op);
@@ -306,6 +314,8 @@ create trigger phase2_tier_change_audit after insert or update on public.phase2_
 create trigger phase2_policy_change_audit after update on public.phase2_freshness_policy
   for each row execute function public.phase2_audit_foundation_change();
 create trigger phase2_day_change_audit after insert or update on public.phase2_freshness_days
+  for each row execute function public.phase2_audit_foundation_change();
+create trigger phase2_manual_price_policy_change_audit after update on public.phase2_manual_price_confirmation_policy
   for each row execute function public.phase2_audit_foundation_change();
 
 -- The policy touch trigger owns version increments. A day change invokes it

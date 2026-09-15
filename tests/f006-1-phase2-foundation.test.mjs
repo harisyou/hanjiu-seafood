@@ -11,7 +11,7 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
   const db=new PGlite();
   try {
     await db.exec(`create role anon; create role authenticated; create schema auth;
-      create function auth.uid() returns uuid language sql stable as $$select null::uuid$$;
+      create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('test.actor',true),'')::uuid$$;
       create function public.is_hanjiu_admin() returns boolean language sql stable as $$select coalesce(current_setting('test.admin',true),'false')='true'$$;
       create table public.products(id uuid primary key,name text,status text,updated_at timestamptz default now());
       create table public.product_variants(id uuid primary key,product_id uuid references products(id),active boolean,inventory integer);
@@ -160,7 +160,26 @@ test('PR-A migration preserves legacy columns and enforces pricing, snapshots, f
     assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where action like 'freshness_%_update'"))[0].n,3);
     // Test-only configured ratio; PR-A deliberately ships NULL, not a business threshold.
     assert.equal((await q(db,'select max_unconfirmed_deviation_ratio from phase2_manual_price_confirmation_policy where id=1'))[0].max_unconfirmed_deviation_ratio,null);
+    const tierAuditCountBefore=(await q(db,"select count(*)::integer n from phase2_audit_events where action='pricing_tier_update'"))[0].n;
+    const freshnessAuditCountBefore=(await q(db,"select count(*)::integer n from phase2_audit_events where action like 'freshness_%'"))[0].n;
+    await db.exec("set app.phase2_reason='   '");
+    await assert.rejects(db.query('update phase2_manual_price_confirmation_policy set max_unconfirmed_deviation_ratio=0.5 where id=1'),/phase2_change_reason_required/);
+    assert.equal((await q(db,'select max_unconfirmed_deviation_ratio from phase2_manual_price_confirmation_policy where id=1'))[0].max_unconfirmed_deviation_ratio,null);
+    assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where action='manual_price_policy_update'"))[0].n,0);
+    await db.exec("set test.actor='80000000-0000-4000-8000-000000000001'; set app.phase2_reason='reviewed test-only manual price ratio'");
     await db.exec('update phase2_manual_price_confirmation_policy set max_unconfirmed_deviation_ratio=0.5 where id=1');
+    const manualPolicyAudit=await q(db,"select actor_id,old_value,new_value,reason,created_at from phase2_audit_events where action='manual_price_policy_update'");
+    assert.equal(manualPolicyAudit.length,1);
+    assert.equal(manualPolicyAudit[0].actor_id,'80000000-0000-4000-8000-000000000001');
+    assert.equal(manualPolicyAudit[0].old_value.max_unconfirmed_deviation_ratio,null);
+    assert.equal(Number(manualPolicyAudit[0].new_value.max_unconfirmed_deviation_ratio),0.5);
+    assert.equal(manualPolicyAudit[0].reason,'reviewed test-only manual price ratio');
+    assert.ok(Number.isFinite(Date.parse(manualPolicyAudit[0].created_at)));
+    await db.exec("set app.phase2_reason=''");
+    await db.exec('update phase2_manual_price_confirmation_policy set max_unconfirmed_deviation_ratio=0.5 where id=1');
+    assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where action='manual_price_policy_update'"))[0].n,1);
+    assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where action='pricing_tier_update'"))[0].n,tierAuditCountBefore);
+    assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where action like 'freshness_%'"))[0].n,freshnessAuditCountBefore);
     assert.equal((await q(db,'select phase2_manual_price_requires_confirmation(450,460) required'))[0].required,false);
     assert.equal((await q(db,'select phase2_manual_price_requires_confirmation(450,999) required'))[0].required,true);
     assert.equal((await q(db,'select phase2_manual_price_requires_confirmation(450,null) required'))[0].required,false);
