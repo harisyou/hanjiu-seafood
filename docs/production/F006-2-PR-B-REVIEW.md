@@ -42,12 +42,18 @@ Codex has not run Production SQL. Do not rerun F005-1, F005-1a, or F006-1.
 
 1. Pause admin writes for a short maintenance window. On the target Production
    DB, run only `supabase/f006-2-phase2-pr-b-preflight.sql`. It is read-only.
-   Require `preflight_summary = PASS`; save every count and MD5 result.
+   Require `preflight_summary = PASS`; save every count and MD5 result,
+   especially `weighted_stock_baseline_count`,
+   `weighted_stock_f0061_business_md5`, and the single JSONB map
+   `protected_function_definition_md5_by_signature`. Nonzero weighted-stock
+   count is supported; do not assume the table is empty.
 2. Review the F006-2 migration and its PR. The owner manually executes only
    `supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql` once in Production
    SQL Editor. It is wrapped in one transaction.
 3. Run `supabase/f006-2-phase2-pr-b-post-verify.sql` after pasting the exact
    preflight count/function/ledger baselines in the marked `NULL` placeholders.
+   Paste the weighted-stock count/digest into its dedicated two-field baseline
+   and the entire protected-function JSONB map into its one-field baseline.
    Require catalog PASS and every comparison PASS. Do not accept untouched
    placeholders as success. Then release the matching app build.
 
@@ -98,6 +104,35 @@ of the reviewed initializer, update guard, normalizer, and batch RPC. Preflight
 first fingerprints the two F006-1 helpers that the migration will replace, so
 an unreviewed Production drift is a BLOCKER before any write. A code-body
 mismatch is a BLOCKER; do not approve a merely similar function name.
+
+## Deployment-safety baselines
+
+Preflight checks the exact F006-1 weighted-stock column set, types, NOT NULL
+markers, defaults, keys, foreign keys, validated CHECKs, stock-code sequence,
+and trigger wiring before F006-2 can ALTER that table. Post-verify checks the
+expected F006-2 column set/nullability, new batch constraints and FK, retained
+price checks, and reviewed trigger-function bodies. These schema checks are
+intentionally *not* a pre/post schema-hash comparison: F006-2 legitimately
+changes three NOT NULL markers and adds two nullable batch columns.
+
+The weighted-stock business digest covers exactly the 19 F006-1 columns, with
+per-row UUIDs and hashes aggregated in UUID order. Fish dates are formatted as
+ISO dates and timestamps as UTC microseconds, so a different SQL Editor session
+timezone does not change the digest. The same expression appears verbatim in
+preflight and post-verify. Post-verify also compares row count and requires
+`batch_id` / `batch_line_no` to remain NULL on all pre-existing rows. A count
+of zero is still compared, but the isolated regression test additionally uses
+an actual F006-1 stock row and proves that both old-data tampering and an
+unexpected batch assignment become BLOCKERs.
+
+The protected-function baseline is an explicit set of 28 type-only signatures,
+not a name regex. It includes all three checkout overloads, both payment-record
+overloads, cancellation/payment/restock/financial guards, and every unchanged
+F006-1 helper. Preflight requires each signature and saves its definition MD5
+in one JSONB map; post-verify requires each map entry and identical definition.
+The two intentionally replaced stock trigger helpers are excluded from equality
+comparison: preflight requires their reviewed F006-1 body fingerprints, while
+post-verify requires their reviewed F006-2 body fingerprints.
 
 ## Explicitly deferred to PR-C
 

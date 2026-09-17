@@ -7,6 +7,8 @@ const f0061=readFileSync(new URL('../supabase/f006-1-phase2-pr-a-database-founda
 const f0062=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql',import.meta.url),'utf8');
 const preflight=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-preflight.sql',import.meta.url),'utf8');
 const postVerify=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-post-verify.sql',import.meta.url),'utf8');
+const preflightStockDigestSql=preflight.match(/select count\(\*\)::bigint weighted_stock_baseline_count,[\s\S]*?from public\.phase2_weighted_stock s;/)[0];
+const postStockDigestTemplate=postVerify.match(/with baseline\(expected_count,expected_md5\) as \(values \(null::bigint,null::text\)\),[\s\S]*?from baseline cross join actual;/)[0];
 const product='10000000-0000-4000-8000-000000000001';
 const q=(db,sql,params)=>db.query(sql,params).then(result=>result.rows);
 
@@ -17,8 +19,40 @@ test('F006-2 verification scripts are SELECT-only and require explicit saved bas
     assert.equal(body.split(';').filter(part=>part.trim()).every(part=>/^\s*(with\b|select\b)/i.test(part)),true);
   }
   assert.match(preflight,/inventory_movements_rows_md5/);
-  assert.match(postVerify,/PASTE_EXACT_PREFLIGHT_SIGNATURE/);
+  assert.match(postVerify,/expected_md5_by_signature/);
   assert.match(postVerify,/null::bigint/);
+  assert.doesNotMatch(preflight+postVerify,/p\.proname\s*~/);
+  const signatures=sql=>[...sql.matchAll(/protected_function\(signature\) as \(values([\s\S]*?)\n\)/g)]
+    .map(match=>[...match[1].matchAll(/'([^']+)'/g)].map(item=>item[1]));
+  const [catalogSignatures,preflightSignatures]=signatures(preflight);
+  const [postSignatures]=signatures(postVerify);
+  assert.equal(catalogSignatures.length,28);
+  assert.deepEqual(preflightSignatures,catalogSignatures);
+  assert.deepEqual(postSignatures,catalogSignatures);
+  for(const signature of [
+    'create_checkout_order(text,text,text,text,jsonb)',
+    'create_checkout_order(text,text,text,text,jsonb,text)',
+    'create_checkout_order(text,text,text,text,jsonb,text,uuid)',
+    'is_hanjiu_admin()','admin_cancel_order(uuid)',
+    'admin_record_order_payment(uuid,integer,text)',
+    'admin_record_order_payment(uuid,integer,text,uuid)',
+    'admin_reverse_order_payment(uuid,text)','enforce_order_cancellation_flow()',
+    'enforce_order_payment_flow()','enforce_paid_order_financial_lock()',
+    'admin_audit_order_financial_integrity()','log_inventory_movement()',
+    'phase2_current_weighted_stock_price(uuid,timestamp with time zone)',
+    'phase2_manual_price_requires_confirmation(integer,integer)',
+    'admin_create_weighted_stock(uuid,date,integer,text,uuid,integer,boolean)',
+    'phase2_guard_inventory_mode()','phase2_guard_tier_overlap()'
+  ])assert.ok(catalogSignatures.includes(signature),signature);
+  const legacyExpression=sql=>{
+    const match=sql.match(/md5\(coalesce\(string_agg\(s\.id::text\|\|':'\|\|md5\(jsonb_build_array\(([\s\S]*?)\)::text\)/);
+    assert.ok(match);
+    return match[1];
+  };
+  const legacyColumns=sql=>[...new Set([...legacyExpression(sql).matchAll(/s\.([a-z_]+)/g)].map(item=>item[1]))];
+  assert.equal(legacyColumns(preflight).length,19);
+  assert.deepEqual(legacyColumns(postVerify),legacyColumns(preflight));
+  assert.equal(legacyExpression(postVerify).replace(/\s+/g,''),legacyExpression(preflight).replace(/\s+/g,''));
   assert.doesNotMatch(f0062,/\b(?:create\s+or\s+replace\s+function|alter\s+table|update|delete\s+from)\s+public\.(?:create_checkout_order|orders|order_items|inventory_movements|order_payments|order_payment_reversals)\b/i);
 });
 
@@ -35,11 +69,13 @@ async function fixture({priorStock=false,stopAtF0061=false}={}){
     create table order_payments(id uuid primary key);
     create table order_payment_reversals(id uuid primary key);
     create table product_images(id uuid primary key,product_id uuid references products(id));
+    create table storage.buckets(id text primary key);
     create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text,unique(bucket_id,name));
+    insert into storage.buckets values('product-images');
     insert into products values('${product}','赤棕','available',now());`);
   await db.exec(f0061);
   if(stopAtF0061)return {db};
-  let historicalId=null;
+  let historicalId=null;let weightedBaseline=null;
   if(priorStock){
     await db.exec("set test.admin='true'; set app.phase2_reason='PR-A historical fixture'");
     await q(db,'update products set inventory_mode=$1 where id=$2',['SINGLE_WEIGHTED',product]);
@@ -47,6 +83,7 @@ async function fixture({priorStock=false,stopAtF0061=false}={}){
     const [date]=await q(db,"select (now() at time zone 'Asia/Taipei')::date::text today");
     const [historical]=await q(db,'insert into phase2_weighted_stock(product_id,fish_date,raw_weight_g) values($1,$2,420) returning id',[product,date.today]);
     historicalId=historical.id;
+    weightedBaseline=(await q(db,preflightStockDigestSql))[0];
   }
   await db.exec(f0062);
   await db.exec("set test.admin='true'; set app.phase2_reason='initial setup'");
@@ -56,7 +93,7 @@ async function fixture({priorStock=false,stopAtF0061=false}={}){
   await q(db,'select admin_save_weight_pricing_tier($1,$2,$3,$4,$5,$6,$7)',[product,600,800,520,1,true,'second tier']);
   const today=(await q(db,"select (now() at time zone 'Asia/Taipei')::date::text today"))[0].today;
   const freshnessVersion=(await q(db,'select version from phase2_freshness_policy where id=1'))[0].version;
-  return {db,today,freshnessVersion,historicalId};
+  return {db,today,freshnessVersion,historicalId,weightedBaseline};
 }
 
 test('preflight fingerprints the exact F006-1 helpers that F006-2 will replace',async()=>{
@@ -70,6 +107,11 @@ test('preflight fingerprints the exact F006-1 helpers that F006-2 will replace',
       assert.equal(definition.body_md5,expected,signature);
       assert.match(preflight,new RegExp(expected));
     }
+    const catalogSql=preflight.slice(0,preflight.indexOf('from checks;')+'from checks;'.length);
+    const [catalog]=await q(db,catalogSql);
+    assert.doesNotMatch(catalog.reasons,/F006-1 weighted stock|F006-1 stock-code sequence/);
+    await db.exec('alter table phase2_weighted_stock alter column raw_weight_g drop not null');
+    assert.match((await q(db,catalogSql))[0].reasons,/F006-1 weighted stock column\/type\/nullability mismatch: raw_weight_g/);
   } finally {await db.close();}
 });
 
@@ -144,8 +186,14 @@ test('server canonical payload accepts representation-only retries but preserves
 });
 
 test('F006-1 historical stock survives migration and price-origin constraints reject every half-state',async()=>{
-  const {db,historicalId,today}=await fixture({priorStock:true});
+  const {db,historicalId,today,weightedBaseline}=await fixture({priorStock:true});
   try {
+    assert.equal(weightedBaseline.weighted_stock_baseline_count,1);
+    const postStockDigestSql=postStockDigestTemplate.replace('null::bigint,null::text',
+      `${weightedBaseline.weighted_stock_baseline_count}::bigint,'${weightedBaseline.weighted_stock_f0061_business_md5}'::text`);
+    assert.equal((await q(db,postStockDigestSql))[0].weighted_stock_baseline_summary,'PASS');
+    await db.exec("set time zone 'Asia/Taipei'");
+    assert.equal((await q(db,postStockDigestSql))[0].weighted_stock_baseline_summary,'PASS');
     const [tier]=await q(db,'select id from phase2_weight_pricing_tiers where lower_bound_g=300');
     const [historical]=await q(db,'select pricing_tier_id,price_per_jin_snapshot,system_base_price,manual_base_price,t0_base_price,version from phase2_weighted_stock where id=$1',[historicalId]);
     assert.equal(historical.pricing_tier_id,tier.id);
@@ -173,6 +221,45 @@ test('F006-1 historical stock survives migration and price-origin constraints re
     ];
     for(const values of cases)await assert.rejects(insert(...values),/violates check constraint/);
     assert.equal((await q(db,'select count(*)::integer n from phase2_weighted_stock'))[0].n,2);
+  } finally {await db.close();}
+});
+
+test('weighted-stock post-verify detects old-row batch assignment and business-row tampering',async()=>{
+  const {db,historicalId,today,weightedBaseline}=await fixture({priorStock:true});
+  try {
+    const postStockDigestSql=postStockDigestTemplate.replace('null::bigint,null::text',
+      `${weightedBaseline.weighted_stock_baseline_count}::bigint,'${weightedBaseline.weighted_stock_f0061_business_md5}'::text`);
+    assert.equal((await q(db,postStockDigestSql))[0].weighted_stock_baseline_summary,'PASS');
+    await db.exec('alter table phase2_weighted_stock disable trigger phase2_stock_update_guard');
+    const [batch]=await q(db,"insert into phase2_stock_batches(submission_id,payload_hash,batch_date,name) values($1,md5('test'),$2,'test') returning id",[crypto.randomUUID(),today]);
+    await q(db,'update phase2_weighted_stock set batch_id=$1,batch_line_no=1 where id=$2',[batch.id,historicalId]);
+    assert.equal((await q(db,postStockDigestSql))[0].weighted_stock_baseline_summary,'BLOCKER: old stock acquired batch data');
+    await q(db,'update phase2_weighted_stock set raw_weight_g=421 where id=$1',[historicalId]);
+    assert.equal((await q(db,postStockDigestSql))[0].weighted_stock_baseline_summary,'BLOCKER: F006-1 business row changed');
+    await db.exec('alter table phase2_weighted_stock disable trigger phase2_stock_no_delete');
+    await q(db,'delete from phase2_weighted_stock where id=$1',[historicalId]);
+    assert.equal((await q(db,postStockDigestSql))[0].weighted_stock_baseline_summary,'BLOCKER: stock count changed');
+  } finally {await db.close();}
+});
+
+test('explicit protected-function baseline detects changed definitions by exact signature',async()=>{
+  const {db}=await fixture();
+  try {
+    const preStart=preflight.lastIndexOf('with protected_function(signature) as (values');
+    const preSql=preflight.slice(preStart,preflight.indexOf(';',preStart)+1);
+    const [saved]=await q(db,preSql);
+    const map=saved.protected_function_definition_md5_by_signature;
+    assert.equal(Object.keys(map).length,28);
+    assert.ok(map['phase2_guard_tier_overlap()']);
+    const postStart=postVerify.indexOf('with baseline(expected_md5_by_signature)');
+    const postSql=postVerify.slice(postStart,postVerify.indexOf('from comparison order by signature;',postStart)+'from comparison order by signature;'.length)
+      .replace('null::jsonb',`'${JSON.stringify(map)}'::jsonb`);
+    const before=await q(db,postSql);
+    assert.equal(before.find(row=>row.signature==='phase2_guard_tier_overlap()').result,'PASS');
+    assert.equal(before.find(row=>row.signature==='create_checkout_order(text,text,text,text,jsonb,text,uuid)').result,'BLOCKER: paste this signature MD5');
+    await db.exec('create or replace function public.phase2_guard_tier_overlap() returns trigger language plpgsql as $$begin return new; end$$');
+    const after=await q(db,postSql);
+    assert.equal(after.find(row=>row.signature==='phase2_guard_tier_overlap()').result,'BLOCKER: definition changed');
   } finally {await db.close();}
 });
 
@@ -242,6 +329,8 @@ test('post-verify catalog accepts the reviewed migration and catches the deliber
     const [result]=await q(db,catalogSql);
     assert.equal(result.catalog_summary,'BLOCKER');
     assert.equal(result.reasons,'F004-1 canonical checkout missing');
+    await db.exec('alter table phase2_weighted_stock alter column pricing_tier_id set not null');
+    assert.match((await q(db,catalogSql))[0].reasons,/F006-2 weighted stock column\/type\/nullability mismatch: pricing_tier_id/);
   } finally {await db.close();}
 });
 
