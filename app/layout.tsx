@@ -2,6 +2,7 @@ import "./globals.css";
 import "./liquid-glass-cart.css";
 import "./product-filters.css";
 import "./catalog.css";
+import "./weighted-admin.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
