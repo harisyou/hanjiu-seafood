@@ -13,6 +13,7 @@ with required_rel(name) as (values
   ('admin_save_weight_pricing_tier(uuid,integer,integer,integer,integer,boolean,text,uuid,timestamp with time zone)'),
   ('admin_create_weighted_stock_batch(uuid,jsonb,integer,text,text)'),
   ('admin_link_weighted_stock_photo(uuid,text)'),
+  ('phase2_normalize_weighted_batch_items(jsonb)'),
   ('phase2_initialize_weighted_stock()'),('phase2_guard_weighted_stock_update()'),
   ('phase2_guard_weighted_product_settings()'),('phase2_audit_weighted_product_settings()')
 ), required_trigger(rel,name) as (values
@@ -47,7 +48,47 @@ with required_rel(name) as (values
     select 1 from pg_attribute where attrelid='public.phase2_weighted_stock'::regclass
       and attname in ('pricing_tier_id','price_per_jin_snapshot','system_base_price') and attnotnull)
   union all select 'missing price origin constraint' where not exists (
-    select 1 from pg_constraint where conrelid='public.phase2_weighted_stock'::regclass and conname='phase2_stock_price_origin_check')
+    select 1 from pg_constraint where conrelid='public.phase2_weighted_stock'::regclass
+      and conname='phase2_stock_price_origin_check' and convalidated)
+  union all select 'price origin constraint body differs from reviewed two-branch invariant' where not exists (
+    select 1 from pg_constraint c where c.conrelid='public.phase2_weighted_stock'::regclass
+      and c.conname='phase2_stock_price_origin_check' and c.convalidated
+      and pg_get_constraintdef(c.oid) ~* 'pricing_tier_id IS NOT NULL.*price_per_jin_snapshot IS NOT NULL.*system_base_price IS NOT NULL.*pricing_tier_id IS NULL.*price_per_jin_snapshot IS NULL.*system_base_price IS NULL.*manual_base_price IS NOT NULL.*manual_price_confirmed')
+  union all select 'missing validated F006-1 positive check: '||column_name from (values
+    ('raw_weight_g'),('price_per_jin_snapshot'),('system_base_price'),
+    ('manual_base_price'),('t0_base_price')) required(column_name)
+    where not exists(select 1 from pg_constraint c
+      where c.conrelid='public.phase2_weighted_stock'::regclass and c.contype='c' and c.convalidated
+        and pg_get_constraintdef(c.oid) ~* (column_name||'[[:space:]]*>[[:space:]]*0'))
+  union all select 'missing validated F006-1 T+0 source check' where not exists (
+    select 1 from pg_constraint c where c.conrelid='public.phase2_weighted_stock'::regclass
+      and c.contype='c' and c.convalidated
+      and pg_get_constraintdef(c.oid) ~* 't0_base_price[[:space:]]*=[[:space:]]*coalesce')
+  union all select 'missing mandatory stock column NOT NULL: '||column_name from (values
+    ('raw_weight_g'),('fish_date'),('t0_base_price'),('manual_price_confirmed'),('version')) required(column_name)
+    where not exists(select 1 from pg_attribute a where a.attrelid='public.phase2_weighted_stock'::regclass
+      and a.attname=required.column_name and a.attnotnull and not a.attisdropped)
+  union all select 'reviewed F006-2 function body mismatch: '||signature from (values
+    ('phase2_initialize_weighted_stock()','78cebd75b5c8871e4361f8c1e8c44af7'),
+    ('phase2_guard_weighted_stock_update()','24766cd7f78bd591e439f29bc388039f'),
+    ('phase2_normalize_weighted_batch_items(jsonb)','5f6776c66069cd6788ddfd4b69d08738'),
+    ('admin_create_weighted_stock_batch(uuid,jsonb,integer,text,text)','92e430c6416e1b59f36734e1e288651b')
+  ) expected(signature,body_md5) where not exists (
+    select 1 from pg_proc p where p.oid=to_regprocedure('public.'||expected.signature)
+      and md5(regexp_replace(p.prosrc,E'\r\n?',E'\n','g'))=expected.body_md5)
+  union all select 'stock initialization trigger points to wrong function' where not exists (
+    select 1 from pg_trigger g where g.tgrelid='public.phase2_weighted_stock'::regclass
+      and g.tgname='phase2_stock_initialize' and g.tgenabled<>'D'
+      and g.tgfoid=to_regprocedure('public.phase2_initialize_weighted_stock()'))
+  union all select 'existing or newly created stock violates price origin/T+0' where exists (
+    select 1 from public.phase2_weighted_stock s where not (
+      (s.pricing_tier_id is not null and s.price_per_jin_snapshot is not null
+       and s.system_base_price is not null and s.price_per_jin_snapshot > 0 and s.system_base_price > 0)
+      or (s.pricing_tier_id is null and s.price_per_jin_snapshot is null and s.system_base_price is null
+          and s.manual_base_price is not null and s.manual_base_price > 0
+          and s.manual_price_confirmed is true)
+    ) or s.t0_base_price is distinct from coalesce(s.manual_base_price,s.system_base_price)
+      or s.t0_base_price <= 0)
   union all select 'F004-1 canonical checkout missing' where not exists (
     select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='public' and p.proname='create_checkout_order' and p.pronargs=7)

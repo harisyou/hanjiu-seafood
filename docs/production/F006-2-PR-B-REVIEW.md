@@ -11,9 +11,10 @@ Codex has not run Production SQL. Do not rerun F005-1, F005-1a, or F006-1.
   and tier actions require an admin, a reason, and a matching `updated_at` for
   edits. F006-1 tier overlap validation and audit remain authoritative.
 - One quick-entry submission creates one batch and all its independent stock
-  rows inside one DB transaction. The unique `submission_id` plus a JSONB
-  payload hash makes identical retries return the original batch; changed
-  payloads conflict. A failed row rolls back the batch and all required rows.
+  rows inside one DB transaction. The unique `submission_id` plus a hash of a
+  **server-normalized** payload makes equivalent retries return the original
+  batch; changed payloads conflict. A failed row rolls back the batch and all
+  required rows.
 - F006-1's stock code sequence and existing stock audit are reused. Existing
   stock price snapshots are not recalculated when tiers change. No new price
   source is persisted for T+N: current price is based on the saved effective
@@ -58,6 +59,45 @@ the specific mismatch and prepare a reviewed forward fix. Do not blindly rerun
 F006-2 or reverse-drop tables/columns containing stock history. Uploaded photos
 are optional and outside the inventory transaction; link/upload failure does
 not justify reverting stock creation.
+
+## Focused safety review: canonical payload and F006-1 compatibility
+
+`phase2_normalize_weighted_batch_items()` creates a JSONB array containing
+only the seven accepted item fields: product UUID, integer grams, ISO fish date,
+nullable integer manual base, boolean confirmation, nullable expected tier UUID,
+and nullable integer expected system base. Unknown item fields are rejected.
+UUID case, integral numeric strings/numbers (including `420.0`), boolean
+strings/booleans, and missing/null/empty optional fields normalize to the same
+typed value. Nonintegral weights/prices are rejected, never rounded. Source and
+note are trimmed; whitespace-only is NULL. Freshness version remains part of
+the identity. **Array order remains part of identity** because it assigns
+`batch_line_no`; changing row order is a conflict. The RPC executes the same
+normalized rows it hashes, so representation-only changes cannot alter work.
+
+F006-1's weighted-stock `raw_weight_g > 0`, snapshot-price `> 0`, optional
+manual-price `> 0`, `t0_base_price > 0`, and
+`t0_base_price = coalesce(manual_base_price, system_base_price)` checks remain
+in place. F006-2 drops only the three NOT NULL markers needed for manual-only
+rows and adds a validated price-origin CHECK. Tier-backed rows require all
+three tier/system fields; manual-only rows require all three NULL plus positive
+manual price and explicit confirmation. SQL CHECK null behavior cannot open a
+half-state because this new origin expression uses explicit IS NULL/IS NOT NULL
+tests and `manual_price_confirmed` is NOT NULL. Historical F006-1 tier-backed
+rows satisfy the new condition without being rewritten. Regression tests apply
+both migrations around a real F006-1 stock and attempt malformed inserts with
+the initializer disabled in an isolated disposable database.
+
+The replacement `phase2_initialize_weighted_stock()` retains F006-1's mode,
+weight, manual-price, server stock-code, initial state, image ownership, enabled
+tier match, numeric rounding, T+0 source, and version guards. PR-B adds the
+available-product requirement, Taipei-date freshness eligibility, and the
+explicit confirmed manual-only branch; it does not weaken the tier-backed
+branch. Post-verify checks the enabled trigger's target, retained validated
+constraints, current-row invariants, and line-ending-normalized `prosrc` MD5s
+of the reviewed initializer, update guard, normalizer, and batch RPC. Preflight
+first fingerprints the two F006-1 helpers that the migration will replace, so
+an unreviewed Production drift is a BLOCKER before any write. A code-body
+mismatch is a BLOCKER; do not approve a merely similar function name.
 
 ## Explicitly deferred to PR-C
 

@@ -211,11 +211,67 @@ begin
   return v_tier;
 end; $$;
 
+-- Canonical request rows, independent of JSON object key order and harmless
+-- representation differences. Array order is identity: it assigns batch_line_no.
+-- Reject unknown fields instead of silently discarding possibly meaningful input.
+create or replace function public.phase2_normalize_weighted_batch_items(p_items jsonb)
+returns jsonb language plpgsql set search_path = public, pg_temp as $$
+declare v_item jsonb; v_items jsonb := '[]'::jsonb; v_unknown text;
+        v_product_id uuid; v_fish_date date; v_date_text text; v_weight integer;
+        v_manual integer; v_expected_tier uuid; v_expected_system integer;
+        v_confirm boolean; v_number numeric; v_text text;
+begin
+  if jsonb_typeof(p_items) is distinct from 'array' then raise exception 'quick_entry_items_required'; end if;
+  if jsonb_array_length(p_items)=0 then raise exception 'quick_entry_items_required'; end if;
+  for v_item in select value from jsonb_array_elements(p_items) loop
+    if jsonb_typeof(v_item) <> 'object' then raise exception 'quick_entry_invalid_item'; end if;
+    select key into v_unknown from jsonb_object_keys(v_item) key where key not in
+      ('product_id','raw_weight_g','fish_date','manual_base_price',
+       'manual_price_confirmed','expected_tier_id','expected_system_base_price') limit 1;
+    if v_unknown is not null then raise exception 'quick_entry_unknown_item_field: %',v_unknown; end if;
+    v_product_id := nullif(btrim(v_item->>'product_id'),'')::uuid;
+    v_date_text := v_item->>'fish_date';
+    if v_product_id is null or v_date_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
+      raise exception 'quick_entry_invalid_item'; end if;
+    v_fish_date := v_date_text::date;
+    if to_char(v_fish_date,'YYYY-MM-DD') <> v_date_text then raise exception 'quick_entry_invalid_item'; end if;
+
+    v_text := nullif(btrim(v_item->>'raw_weight_g'),'');
+    v_number := v_text::numeric;
+    if v_number is null or v_number <> trunc(v_number) or v_number not between -2147483648 and 2147483647 then
+      raise exception 'quick_entry_invalid_integer'; end if;
+    v_weight := v_number::integer;
+    v_text := nullif(btrim(v_item->>'manual_base_price'),'');
+    v_manual := null;
+    if v_text is not null then
+      v_number := v_text::numeric;
+      if v_number <> trunc(v_number) or v_number not between -2147483648 and 2147483647 then
+        raise exception 'quick_entry_invalid_integer'; end if;
+      v_manual := v_number::integer;
+    end if;
+    v_text := nullif(btrim(v_item->>'expected_system_base_price'),'');
+    v_expected_system := null;
+    if v_text is not null then
+      v_number := v_text::numeric;
+      if v_number <> trunc(v_number) or v_number not between -2147483648 and 2147483647 then
+        raise exception 'quick_entry_invalid_integer'; end if;
+      v_expected_system := v_number::integer;
+    end if;
+    v_expected_tier := nullif(btrim(v_item->>'expected_tier_id'),'')::uuid;
+    v_confirm := coalesce(nullif(btrim(v_item->>'manual_price_confirmed'),'')::boolean,false);
+    v_items := v_items || jsonb_build_array(jsonb_build_object(
+      'product_id',v_product_id,'raw_weight_g',v_weight,'fish_date',v_fish_date::text,
+      'manual_base_price',v_manual,'manual_price_confirmed',v_confirm,
+      'expected_tier_id',v_expected_tier,'expected_system_base_price',v_expected_system));
+  end loop;
+  return v_items;
+end; $$;
+
 create or replace function public.admin_create_weighted_stock_batch(
   p_submission_id uuid,p_items jsonb,p_expected_freshness_version integer,
   p_source text default null,p_note text default null)
 returns public.phase2_stock_batches language plpgsql security definer set search_path = public, pg_temp as $$
-declare v_batch public.phase2_stock_batches; v_hash text; v_source text := nullif(btrim(p_source),'');
+declare v_batch public.phase2_stock_batches; v_hash text; v_items jsonb; v_source text := nullif(btrim(p_source),'');
         v_note text := nullif(btrim(p_note),''); v_today date := (clock_timestamp() at time zone 'Asia/Taipei')::date;
         v_policy public.phase2_freshness_policy; v_item jsonb; v_stock public.phase2_weighted_stock;
         v_number integer; v_line_no integer := 0; v_fish_date date; v_product_id uuid; v_weight integer;
@@ -223,9 +279,8 @@ declare v_batch public.phase2_stock_batches; v_hash text; v_source text := nulli
 begin
   if not public.is_hanjiu_admin() then raise exception 'admin_required'; end if;
   if p_submission_id is null then raise exception 'quick_entry_submission_required'; end if;
-  if jsonb_typeof(p_items) is distinct from 'array' or jsonb_array_length(p_items)=0 then
-    raise exception 'quick_entry_items_required'; end if;
-  v_hash := md5(jsonb_build_object('items',p_items,'freshness_version',p_expected_freshness_version,
+  v_items := public.phase2_normalize_weighted_batch_items(p_items);
+  v_hash := md5(jsonb_build_object('items',v_items,'freshness_version',p_expected_freshness_version,
     'source',v_source,'note',v_note)::text);
   select * into v_batch from public.phase2_stock_batches where submission_id=p_submission_id for update;
   if found then
@@ -250,7 +305,7 @@ begin
   update public.phase2_stock_batches set sequence_no=v_number,
     name=to_char(v_today,'YYYY/MM/DD')||' '||coalesce(v_source||' ','')||'魚貨 #'||v_number
   where id=v_batch.id returning * into v_batch;
-  for v_item in select value from jsonb_array_elements(p_items) loop
+  for v_item in select value from jsonb_array_elements(v_items) loop
     v_line_no := v_line_no+1;
     if jsonb_typeof(v_item) <> 'object' then raise exception 'quick_entry_invalid_item'; end if;
     v_product_id := (v_item->>'product_id')::uuid;
@@ -272,7 +327,7 @@ begin
        or v_stock.system_base_price is distinct from v_expected_system then
       raise exception 'quick_entry_price_changed'; end if;
   end loop;
-  update public.phase2_stock_batches set stock_count=jsonb_array_length(p_items)
+  update public.phase2_stock_batches set stock_count=jsonb_array_length(v_items)
     where id=v_batch.id returning * into v_batch;
   return v_batch;
 end; $$;
@@ -309,7 +364,8 @@ revoke all on public.phase2_stock_batch_daily_counters,public.phase2_stock_batch
   public.phase2_stock_photos from public,anon,authenticated;
 grant select on public.phase2_stock_batches,public.phase2_stock_photos to authenticated;
 revoke all on function public.phase2_guard_weighted_product_settings(),
-  public.phase2_audit_weighted_product_settings() from public,anon,authenticated;
+  public.phase2_audit_weighted_product_settings(),
+  public.phase2_normalize_weighted_batch_items(jsonb) from public,anon,authenticated;
 revoke all on function public.admin_update_weighted_product_settings(uuid,timestamptz,text,integer,integer,text),
   public.admin_save_weight_pricing_tier(uuid,integer,integer,integer,integer,boolean,text,uuid,timestamptz),
   public.admin_create_weighted_stock_batch(uuid,jsonb,integer,text,text),

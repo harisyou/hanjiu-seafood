@@ -21,6 +21,7 @@ with required_rel(name) as (values
   ('phase2_weighted_stock','batch_id'),('phase2_weighted_stock','batch_line_no')
 ), new_fn(signature) as (values
   ('phase2_guard_weighted_product_settings()'),('phase2_audit_weighted_product_settings()'),
+  ('phase2_normalize_weighted_batch_items(jsonb)'),
   ('admin_update_weighted_product_settings(uuid,timestamp with time zone,text,integer,integer,text)'),
   ('admin_save_weight_pricing_tier(uuid,integer,integer,integer,integer,boolean,text,uuid,timestamp with time zone)'),
   ('admin_create_weighted_stock_batch(uuid,jsonb,integer,text,text)'),
@@ -43,6 +44,12 @@ with required_rel(name) as (values
     ('phase2_current_weighted_stock_price(uuid,timestamp with time zone)'),
     ('admin_create_weighted_stock(uuid,date,integer,text,uuid,integer,boolean)'),
     ('is_hanjiu_admin()')) f(signature) where to_regprocedure('public.'||signature) is null
+  union all select 'F006-1 replaced helper differs from reviewed PR-A: '||signature from (values
+    ('phase2_initialize_weighted_stock()','a41e2ff5cfd1176e11e6766113ee67d1'),
+    ('phase2_guard_weighted_stock_update()','33e277b593304198a358bc7483c071b2')
+  ) expected(signature,body_md5) where not exists (
+    select 1 from pg_proc p where p.oid=to_regprocedure('public.'||expected.signature)
+      and md5(regexp_replace(p.prosrc,E'\r\n?',E'\n','g'))=expected.body_md5)
   union all select 'canonical F004-1 seven-argument checkout missing' where not exists (
     select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='public' and p.proname='create_checkout_order' and p.pronargs=7)
