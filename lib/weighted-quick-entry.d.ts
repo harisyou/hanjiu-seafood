@@ -1,0 +1,15 @@
+export type WeightedProduct = {id:string;name:string;inventory_mode:string|null;status?:string;common_weight_min_g?:number|null;common_weight_max_g?:number|null};
+export type WeightedTier = {id:string;product_id:string;lower_bound_g:number;upper_bound_g:number;price_per_jin:number;enabled:boolean;sort_order:number;updated_at?:string};
+export type FreshnessDay = {day_offset:number;multiplier:number};
+export type FreshnessPolicy = {max_sale_day:number;version:number;max_unconfirmed_deviation_ratio?:number|null};
+export type EntryRow = {product_id:string;raw_weight_g:string|number;fish_date:string;manual_base_price:string|number|null;manual_price_confirmed:boolean};
+export type RowQuote = {tier:WeightedTier|null;system:number|null;base:number|null;offset:number|null;currentPrice:number|null;errors:string[];warnings:string[]};
+export function taiwanDate(now?:Date):string;
+export function dayOffset(fishDate:string,today:string):number|null;
+export function gramsFromJinLiang(jin:number,liang:number):number|null;
+export function gramsLabel(grams:number):string;
+export function matchedTier(tiers:WeightedTier[],productId:string,grams:number):WeightedTier|null;
+export function systemBasePrice(grams:number,pricePerJin:number):number|null;
+export function manualConfirmationRequired(systemPrice:number|null,manualPrice:number|null,ratio:number|null|undefined):boolean;
+export function rowQuote(row:EntryRow,product:WeightedProduct|null,tiers:WeightedTier[],freshnessDays:FreshnessDay[],policy:FreshnessPolicy|null,today:string):RowQuote;
+export function duplicateWeightWarnings(rows:EntryRow[],products:WeightedProduct[]):(string|null)[];

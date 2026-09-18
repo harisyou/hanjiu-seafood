@@ -48,15 +48,16 @@ in this order. Do not rerun historical migrations merely because they appear her
     policy. Follow [Phase 1 deployment](F005-1-CATALOG-DEPLOYMENT.md), then run the
     updated `supabase/f005-1-product-catalog-verify.sql` (read-only assertions).
 30. `supabase/f006-1-phase2-pr-a-database-foundation.sql` — Phase 2 PR-A only.
-    **New, generated migration; not applied by Codex and not assumed applied in
-    Production.** Owner reviews the PR and prior baseline, then decides when to
-    run it manually. Before deployment, run the read-only
-    `supabase/f006-1-phase2-pr-a-preflight.sql`, resolve all BLOCKERs and save
-    its counts/fingerprints. After deployment, paste those baselines into the
-    read-only `supabase/f006-1-phase2-pr-a-post-verify.sql` and require all three
-    summaries to PASS. The original `supabase/f006-1-phase2-pr-a-verify.sql`
-    remains supplemental inspection.
-    See [Phase 2 PR-A review](F006-1-PR-A-REVIEW.md).
+    **Already manually applied in Production by the owner; all three PR-A
+    verification summaries passed. Do not rerun.** Historical preflight and
+    post-verify remain available. See [Phase 2 PR-A review](F006-1-PR-A-REVIEW.md).
+31. `supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql` — Phase 2 PR-B.
+    **Not applied by Codex.** After PR review and a maintenance window, run
+    `supabase/f006-2-phase2-pr-b-preflight.sql` (read-only), save its current
+    Production counts/function hashes/ledger hashes, and require PASS. The owner
+    may then manually run F006-2 exactly once. Paste those saved baselines into
+    `supabase/f006-2-phase2-pr-b-post-verify.sql` and require all results PASS
+    before exposing the PR-B UI. See [PR-B review](F006-2-PR-B-REVIEW.md).
 
 ## Operator rules
 
