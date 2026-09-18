@@ -134,6 +134,44 @@ The two intentionally replaced stock trigger helpers are excluded from equality
 comparison: preflight requires their reviewed F006-1 body fingerprints, while
 post-verify requires their reviewed F006-2 body fingerprints.
 
+## Production forensic note: inventory movement row digest
+
+The owner reports that F006-2 ran successfully in Production. The pre/post
+`inventory_movements` counts are both 47, the column-schema MD5 matches, the
+current row digest is `a61bfb89fc7d93b4fbd04408f6b66461`, and the latest
+observed movement predates deployment (2026-09-01). However, the original
+preflight `inventory_movements_rows_md5` result was lost. **Pre-migration
+row-digest evidence unavailable**; historical row equality is **unverified**, not
+PASS. Never use the current digest as a fabricated pre-migration baseline or
+change the post-verify comparison to force PASS. Matching counts, schema, and
+latest timestamps do not prove every historical field is unchanged.
+
+Source review finds no F006-2 statement that inserts, updates, deletes, or
+rebuilds `public.inventory_movements` or writes `public.product_variants`.
+F006-2's DDL changes `products` and `phase2_weighted_stock`, creates batch/photo
+tables, and defines functions/triggers; creating or replacing a trigger
+function does not execute it on historical rows. There is no top-level DML in
+F006-2. The existing
+`inventory_variant_movement_ledger` trigger is attached only to INSERT or
+inventory UPDATE on `product_variants`, and its `log_inventory_movement()`
+function only INSERTs ledger rows when that trigger fires. F006-2 does not
+invoke a checkout, cancellation, restock, or payment RPC. Newly defined admin
+RPCs likewise contain no ledger DML. This establishes no ledger rewrite path
+in the reviewed repository migration/trigger chain, but cannot retroactively
+prove the missing Production before/after digest equality or rule out unrelated
+concurrent or database-local activity not represented in the repository.
+
+The F006-2 preflight and post-verify ledger row expressions are the same:
+`md5(coalesce(string_agg(to_jsonb(m)::text,'|' order by m.id::text),''))`.
+Both read `public.inventory_movements`; the post-verify only wraps that
+expression in its comparison CTE. One limitation is that `to_jsonb(m)` includes
+the `created_at timestamptz` field, whose text representation can depend on
+the SQL session timezone. Thus this full-row digest can differ across sessions
+without a data change. The lost preflight value and its session context cannot
+be reconstructed now. No additional read-only Production query can recover
+that missing historical baseline; the current count, schema and recent-row
+checks are corroborating evidence only.
+
 ## Explicitly deferred to PR-C
 
 The management page is read-only by design. It does not offer fake controls for
