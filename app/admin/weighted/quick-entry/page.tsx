@@ -5,6 +5,7 @@ import {useCallback,useEffect,useId,useMemo,useRef,useState} from "react";
 import {createClient} from "@/lib/supabase-browser";
 import {dayOffset,duplicateWeightWarnings,gramsFromJinLiang,gramsLabel,jinLiangInputsForGrams,rowQuote,taiwanDate} from "@/lib/weighted-quick-entry";
 import type {EntryRow,FreshnessDay,FreshnessPolicy,WeightedProduct,WeightedTier} from "@/lib/weighted-quick-entry";
+import {saveOptionalStockPhotos} from "@/lib/weighted-stock-photo";
 
 type Product=WeightedProduct&{status:string};
 type Row=EntryRow&{id:string;photo:File|null;photoToken:string;inputMode:"grams"|"jin";jin:string;liang:string;needsReconfirm:boolean};
@@ -107,14 +108,15 @@ export default function WeightedQuickEntryPage(){
   function review(){if(hardErrors){setNotice("請先修正標示的 hard error，再進入確認畫面。");return;}setNotice("");setStep("review");window.scrollTo({top:0,behavior:"smooth"});}
   function leave(href:string){if(!dirty&&!uncertain||window.confirm("尚有未上架的魚貨，離開後將遺失。\n\n確定離開？"))window.location.href=href;}
 
-  async function uploadPhotos(created:Stock[]){const failed:number[]=[];
-    for(let i=0;i<rows.length;i++){const file=rows[i].photo,stock=created.find(item=>item.batch_line_no===i+1);if(!file||!stock)continue;
-      const path=`weighted-stock/${stock.id}/${rows[i].photoToken}.webp`;
-      try{const blob=await compressPhoto(file);const uploaded=await db.storage.from("product-images").upload(path,blob,{contentType:"image/webp",upsert:false});
-        if(uploaded.error&&!String(uploaded.error.message).toLowerCase().includes("already exists")&&!String(uploaded.error.message).includes("409"))throw uploaded.error;
-        const linked=await db.rpc("admin_link_weighted_stock_photo",{p_stock_id:stock.id,p_storage_path:path});if(linked.error)throw linked.error;
-      }catch{failed.push(i);}}
+  async function uploadPhotos(created:Stock[],onlyIndexes?:number[]){
+    const retrySet=onlyIndexes?new Set(onlyIndexes):null;
+    const tasks=rows.flatMap((row,index)=>{const stock=created.find(item=>item.batch_line_no===index+1);
+      return row.photo&&stock&&(!retrySet||retrySet.has(index))?[{index,stockId:stock.id,photoToken:row.photoToken,photo:row.photo}]:[];});
+    const failed=await saveOptionalStockPhotos(tasks,{prepare:compressPhoto,
+      upload:async(path,blob)=>{const uploaded=await db.storage.from("product-images").upload(path,blob,{contentType:"image/webp",upsert:false});if(uploaded.error)throw uploaded.error;},
+      link:async(stockId,path)=>{const linked=await db.rpc("admin_link_weighted_stock_photo",{p_stock_id:stockId,p_storage_path:path});if(linked.error)throw linked.error;}});
     setPhotoFailures(failed);if(failed.length)setNotice(`現貨已建立；${failed.length} 張選填照片未完成，請重試。照片失敗不影響庫存。`);
+    else if(onlyIndexes?.length)setNotice("選填照片重試完成；現貨資料未重新建立。");
   }
 
   async function submit(){if(busy||!policy||hardErrors)return;
@@ -173,7 +175,7 @@ export default function WeightedQuickEntryPage(){
     {step==="success"&&batch&&<section className="panel weightedSuccess"><h2>本批上架成功｜共 {batch.stock_count} 尾</h2><p>{batch.name}</p><div className="weightedSummary">{Object.entries(grouped).map(([id,count])=><div key={id}>{products.find(item=>item.id===id)?.name||id} <strong>{count} 尾</strong></div>)}</div>
       <div className="weightedStockList">{stocks.map(stock=>{const offset=dayOffset(stock.fish_date,today);const multiplier=days.find(item=>item.day_offset===offset)?.multiplier;const current=offset!==null&&offset>=0&&offset<=(policy?.max_sale_day??-1)&&multiplier!=null?Math.round(stock.t0_base_price*multiplier):null;
         return <div key={stock.id}><strong>{stock.stock_code}</strong><span>{products.find(p=>p.id===stock.product_id)?.name}｜{stock.raw_weight_g}g｜T+0 {money(stock.t0_base_price)}｜T+{offset??"?"}｜目前 {money(current)}｜{stock.status}</span></div>;})}</div>
-      {photoFailures.length>0&&<button type="button" disabled={busy} onClick={async()=>{setBusy(true);await uploadPhotos(stocks);setBusy(false);}}>重試未完成照片（不重建現貨）</button>}
+      {photoFailures.length>0&&<button type="button" disabled={busy} onClick={async()=>{setBusy(true);await uploadPhotos(stocks,photoFailures);setBusy(false);}}>重試未完成照片（不重建現貨）</button>}
       <div className="weightedActions"><Link className="buttonLink" href={`/admin/weighted?batch=${batch.id}`}>查看本批現貨</Link><button type="button" onClick={startAgain}>繼續上架魚貨</button></div></section>}
   </main>;
 }

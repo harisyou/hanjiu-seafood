@@ -3,11 +3,15 @@ import test from 'node:test';
 import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
 import {gramsFromJinLiang} from '../lib/weighted-quick-entry.mjs';
+import {saveOptionalStockPhotos} from '../lib/weighted-stock-photo.mjs';
 
 const f0061=readFileSync(new URL('../supabase/f006-1-phase2-pr-a-database-foundation.sql',import.meta.url),'utf8');
 const f0062=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql',import.meta.url),'utf8');
 const preflight=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-preflight.sql',import.meta.url),'utf8');
 const postVerify=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-post-verify.sql',import.meta.url),'utf8');
+const quickEntryPage=readFileSync(new URL('../app/admin/weighted/quick-entry/page.tsx',import.meta.url),'utf8');
+const stockManagementPage=readFileSync(new URL('../app/admin/weighted/page.tsx',import.meta.url),'utf8');
+const photoHelper=readFileSync(new URL('../lib/weighted-stock-photo.mjs',import.meta.url),'utf8');
 const preflightStockDigestSql=preflight.match(/select count\(\*\)::bigint weighted_stock_baseline_count,[\s\S]*?from public\.phase2_weighted_stock s;/)[0];
 const postStockDigestTemplate=postVerify.match(/with baseline\(expected_count,expected_md5\) as \(values \(null::bigint,null::text\)\),[\s\S]*?from baseline cross join actual;/)[0];
 const product='10000000-0000-4000-8000-000000000001';
@@ -446,6 +450,81 @@ test('fish-date guard, non-admin rejection, browser write privileges, and option
     assert.equal(retried.stock_id,stock.id);
     assert.equal((await q(db,'select count(*)::integer n from phase2_stock_photos'))[0].n,1);
   } finally {await db.close();}
+});
+
+test('optional photo upload/link failures are isolated per stock and retry without recreating inventory',async()=>{
+  const {db,today,freshnessVersion}=await fixture();
+  try {
+    const [tier]=await q(db,'select id from phase2_weight_pricing_tiers where lower_bound_g=300');
+    const items=[420,430,440].map(weight=>item(weight,today,null,false,tier.id,Math.round(weight*480/600)));
+    const [batch]=await q(db,'with created as materialized (select admin_create_weighted_stock_batch($1,$2,$3) batch) select (batch).* from created',
+      [crypto.randomUUID(),items,freshnessVersion]);
+    const stocks=await q(db,'select id,stock_code,batch_line_no from phase2_weighted_stock where batch_id=$1 order by batch_line_no',[batch.id]);
+    const before=await quickEntryPersistenceSnapshot(db);
+    const tasks=stocks.map((stock,index)=>({index,stockId:stock.id,photoToken:`90000000-0000-4000-8000-00000000000${index+1}`,photo:{index}}));
+    const uploadFailures=new Set([tasks[0].stockId]);
+    const linkFailures=new Set([tasks[1].stockId]);
+    const operations={
+      prepare:async photo=>photo,
+      upload:async path=>{
+        const stockId=path.split('/')[1];
+        if(uploadFailures.delete(stockId))throw new Error('simulated upload failure');
+        try {await q(db,"insert into storage.objects(bucket_id,name) values('product-images',$1)",[path]);}
+        catch {const error=new Error('object already exists');error.statusCode=409;throw error;}
+      },
+      link:async(stockId,path)=>{
+        if(linkFailures.delete(stockId))throw new Error('simulated link failure');
+        await q(db,'select admin_link_weighted_stock_photo($1,$2)',[stockId,path]);
+      }
+    };
+    assert.deepEqual(await saveOptionalStockPhotos(tasks,operations),[0,1]);
+    assert.deepEqual(await quickEntryPersistenceSnapshot(db),before);
+    assert.equal((await q(db,'select count(*)::integer n from phase2_stock_batches'))[0].n,1);
+    assert.equal((await q(db,'select count(*)::integer n from phase2_stock_photos'))[0].n,1);
+    assert.equal((await q(db,"select count(*)::integer n from storage.objects where bucket_id='product-images'"))[0].n,2);
+
+    assert.deepEqual(await saveOptionalStockPhotos(tasks.filter(task=>[0,1].includes(task.index)),operations),[]);
+    assert.deepEqual(await quickEntryPersistenceSnapshot(db),before);
+    assert.equal((await q(db,'select count(*)::integer n from phase2_stock_photos'))[0].n,3);
+    assert.equal((await q(db,"select count(*)::integer n from storage.objects where bucket_id='product-images'"))[0].n,3);
+    assert.deepEqual(await saveOptionalStockPhotos(tasks,operations),[]);
+    assert.deepEqual(await quickEntryPersistenceSnapshot(db),before);
+    assert.equal((await q(db,'select count(*)::integer n from phase2_stock_photos'))[0].n,3);
+    assert.equal((await q(db,"select count(*)::integer n from storage.objects where bucket_id='product-images'"))[0].n,3);
+  } finally {await db.close();}
+});
+
+test('ambiguous successful photo link converges to one object and link on retry',async()=>{
+  const {db,today,freshnessVersion}=await fixture();
+  try {
+    const [tier]=await q(db,'select id from phase2_weight_pricing_tiers where lower_bound_g=300');
+    const [batch]=await q(db,'with created as materialized (select admin_create_weighted_stock_batch($1,$2,$3) batch) select (batch).* from created',
+      [crypto.randomUUID(),[item(420,today,null,false,tier.id,336)],freshnessVersion]);
+    const [stock]=await q(db,'select id from phase2_weighted_stock where batch_id=$1',[batch.id]);
+    const before=await quickEntryPersistenceSnapshot(db);
+    const task={index:0,stockId:stock.id,photoToken:'90000000-0000-4000-8000-000000000099',photo:{}};
+    let loseResponse=true;
+    const operations={prepare:async photo=>photo,
+      upload:async path=>{try {await q(db,"insert into storage.objects(bucket_id,name) values('product-images',$1)",[path]);}
+        catch {const error=new Error('409 object already exists');error.status=409;throw error;}},
+      link:async(stockId,path)=>{await q(db,'select admin_link_weighted_stock_photo($1,$2)',[stockId,path]);
+        if(loseResponse){loseResponse=false;throw new Error('simulated response timeout');}}};
+    assert.deepEqual(await saveOptionalStockPhotos([task],operations),[0]);
+    assert.equal((await q(db,'select count(*)::integer n from phase2_stock_photos'))[0].n,1);
+    assert.deepEqual(await saveOptionalStockPhotos([task],operations),[]);
+    assert.deepEqual(await quickEntryPersistenceSnapshot(db),before);
+    assert.equal((await q(db,'select count(*)::integer n from phase2_stock_photos'))[0].n,1);
+    assert.equal((await q(db,"select count(*)::integer n from storage.objects where bucket_id='product-images'"))[0].n,1);
+  } finally {await db.close();}
+});
+
+test('photo retry UI is warning-only, retries failed rows, and management falls back to product imagery',()=>{
+  assert.match(quickEntryPage,/setStep\("success"\)[\s\S]*await uploadPhotos/);
+  assert.match(quickEntryPage,/現貨已建立；\$\{failed\.length\} 張選填照片未完成/);
+  assert.match(quickEntryPage,/uploadPhotos\(stocks,photoFailures\)/);
+  assert.match(quickEntryPage,/重試未完成照片（不重建現貨）/);
+  assert.doesNotMatch(photoHelper,/admin_create_weighted_stock_batch|phase2_weighted_stock|phase2_stock_batches/);
+  assert.match(stockManagementPage,/if\(direct\)return[\s\S]*gallery\.find[\s\S]*image_url\|\|null/);
 });
 
 test('server freshness uses each past fish date and policy-enforced manual confirmation',async()=>{
