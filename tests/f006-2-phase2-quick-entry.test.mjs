@@ -152,6 +152,54 @@ test('PR-B forward migration executes and batch creation is atomic, idempotent, 
   } finally {await db.close();}
 });
 
+async function quickEntryPersistenceSnapshot(db){
+  const [batchCount]=await q(db,'select count(*)::integer n from phase2_stock_batches');
+  const stocks=await q(db,'select id,stock_code,batch_id from phase2_weighted_stock order by id');
+  const [sequence]=await q(db,'select last_value,is_called from phase2_stock_code_seq');
+  return {batchCount:batchCount.n,stocks,sequence};
+}
+
+test('database idempotent replay returns the original batch without stock or stock-code sequence consumption',async()=>{
+  const {db,today,freshnessVersion}=await fixture();
+  try {
+    const [tier]=await q(db,'select id from phase2_weight_pricing_tiers where lower_bound_g=300');
+    const rows=[item(420,today,null,false,tier.id,336),item(430,today,null,false,tier.id,344)];
+    const submission=crypto.randomUUID();
+    const sql='with created as materialized (select admin_create_weighted_stock_batch($1,$2,$3,$4,$5) batch) select (batch).* from created';
+    const params=[submission,rows,freshnessVersion,'南方澳','今日魚貨'];
+    const [first]=await q(db,sql,params);
+    const before=await quickEntryPersistenceSnapshot(db);
+    assert.equal(before.batchCount,1);
+    assert.equal(before.stocks.length,2);
+    assert.ok(before.stocks.every(stock=>stock.batch_id===first.id));
+
+    const [replay]=await q(db,sql,params);
+    const after=await quickEntryPersistenceSnapshot(db);
+    assert.deepEqual(replay,first);
+    assert.deepEqual(after,before);
+  } finally {await db.close();}
+});
+
+test('database submission conflict creates no batch or stock and consumes no stock-code sequence value',async()=>{
+  const {db,today,freshnessVersion}=await fixture();
+  try {
+    const [tier]=await q(db,'select id from phase2_weight_pricing_tiers where lower_bound_g=300');
+    const rows=[item(420,today,null,false,tier.id,336)];
+    const submission=crypto.randomUUID();
+    const sql='select admin_create_weighted_stock_batch($1,$2,$3,$4,$5)';
+    await q(db,sql,[submission,rows,freshnessVersion,'南方澳','今日魚貨']);
+    const before=await quickEntryPersistenceSnapshot(db);
+    assert.equal(before.batchCount,1);
+    assert.equal(before.stocks.length,1);
+
+    const changedRows=[item(430,today,null,false,tier.id,344)];
+    await assert.rejects(q(db,sql,[submission,changedRows,freshnessVersion,'南方澳','今日魚貨']),
+      /quick_entry_idempotency_conflict/);
+    const after=await quickEntryPersistenceSnapshot(db);
+    assert.deepEqual(after,before);
+  } finally {await db.close();}
+});
+
 test('server canonical payload accepts representation-only retries but preserves row and value identity',async()=>{
   const {db,today,freshnessVersion}=await fixture();
   try {
