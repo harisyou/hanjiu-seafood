@@ -3,7 +3,7 @@
 import Link from "next/link";
 import {useCallback,useEffect,useId,useMemo,useRef,useState} from "react";
 import {createClient} from "@/lib/supabase-browser";
-import {dayOffset,duplicateWeightWarnings,gramsFromJinLiang,gramsLabel,rowQuote,taiwanDate} from "@/lib/weighted-quick-entry";
+import {dayOffset,duplicateWeightWarnings,gramsFromJinLiang,gramsLabel,jinLiangInputsForGrams,rowQuote,taiwanDate} from "@/lib/weighted-quick-entry";
 import type {EntryRow,FreshnessDay,FreshnessPolicy,WeightedProduct,WeightedTier} from "@/lib/weighted-quick-entry";
 
 type Product=WeightedProduct&{status:string};
@@ -91,6 +91,10 @@ export default function WeightedQuickEntryPage(){
     window.addEventListener("beforeunload",handler);return()=>window.removeEventListener("beforeunload",handler);},[dirty,uncertain]);
 
   function updateRow(id:string,patch:Partial<Row>){setRows(current=>current.map(row=>row.id===id?{...row,...patch}:row));}
+  function changeWeightMode(row:Row,inputMode:Row["inputMode"]){
+    if(inputMode!=="jin"){updateRow(row.id,{inputMode});return;}
+    updateRow(row.id,{inputMode,...jinLiangInputsForGrams(Number(row.raw_weight_g),row.jin,row.liang)});
+  }
   function selectProduct(id:string,productId:string){updateRow(id,{product_id:productId,manual_price_confirmed:false,needsReconfirm:true});
     const next=[productId,...recentProducts.filter(value=>value!==productId)].slice(0,6);setRecentProducts(next);localStorage.setItem("phase2-recent-weighted-products",JSON.stringify(next));}
   function addRow(){const last=rows.at(-1);const next=blank(last?.fish_date||today,last?.product_id||"");setRows(current=>[...current,next]);setTimeout(()=>weightRefs.current[next.id]?.focus(),0);}
@@ -146,11 +150,11 @@ export default function WeightedQuickEntryPage(){
       <div className="weightedRows">{rows.map((row,i)=>{const quote=quotes[i],product=products.find(item=>item.id===row.product_id);
         return <section className="panel weightedRow" key={row.id}><header><h2>第 {i+1} 尾</h2><button type="button" disabled={rows.length===1} onClick={()=>setRows(current=>current.filter(item=>item.id!==row.id))}>移除此列</button></header>
           <div className="weightedRowFields"><label>商品 *<ProductPicker products={products} value={row.product_id} onSelect={id=>selectProduct(row.id,id)}/></label><label>魚貨日期 *<input type="date" max={today} value={row.fish_date} onChange={e=>updateRow(row.id,{fish_date:e.target.value})}/></label>
-            <label>重量輸入<select value={row.inputMode} onChange={e=>updateRow(row.id,{inputMode:e.target.value as Row["inputMode"]})}><option value="grams">克 g</option><option value="jin">台斤＋兩</option></select></label>
+            <label>重量輸入<select value={row.inputMode} onChange={e=>changeWeightMode(row,e.target.value as Row["inputMode"])}><option value="grams">克 g</option><option value="jin">台斤＋兩</option></select></label>
             {row.inputMode==="grams"?<label>處理前重量（g）*<input ref={element=>{weightRefs.current[row.id]=element;}} type="number" min="1" step="1" inputMode="numeric" value={row.raw_weight_g}
               onChange={e=>updateRow(row.id,{raw_weight_g:e.target.value,manual_price_confirmed:false,needsReconfirm:row.manual_base_price!==""})}
               onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();addRow();}}}/></label>
-              :<div className="weightedTwo"><label>台斤<input type="number" min="0" step="1" value={row.jin} onChange={e=>{const jin=e.target.value,grams=gramsFromJinLiang(Number(jin||0),Number(row.liang||0));updateRow(row.id,{jin,raw_weight_g:grams===null?"":String(grams),manual_price_confirmed:false,needsReconfirm:row.manual_base_price!==""});}}/></label><label>兩（0–15）<input type="number" min="0" max="15" step="1" value={row.liang} onChange={e=>{const liang=e.target.value,grams=gramsFromJinLiang(Number(row.jin||0),Number(liang||0));updateRow(row.id,{liang,raw_weight_g:grams===null?"":String(grams),manual_price_confirmed:false,needsReconfirm:row.manual_base_price!==""});}} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();addRow();}}}/></label></div>}
+              :<div className="weightedTwo"><label>台斤<input type="number" min="0" step="1" inputMode="numeric" value={row.jin} onChange={e=>{const jin=e.target.value,grams=gramsFromJinLiang(Number(jin||0),Number(row.liang||0));updateRow(row.id,{jin,raw_weight_g:grams===null?"":String(grams),manual_price_confirmed:false,needsReconfirm:row.manual_base_price!==""});}}/></label><label>兩（0–未滿 16）<input type="number" min="0" step="any" inputMode="decimal" value={row.liang} onChange={e=>{const liang=e.target.value,grams=gramsFromJinLiang(Number(row.jin||0),Number(liang||0));updateRow(row.id,{liang,raw_weight_g:grams===null?"":String(grams),manual_price_confirmed:false,needsReconfirm:row.manual_base_price!==""});}} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();addRow();}}}/></label></div>}
             <label>人工 T+0 基準價（選填）<input type="number" min="1" step="1" value={row.manual_base_price??""} onChange={e=>updateRow(row.id,{manual_base_price:e.target.value,manual_price_confirmed:false,needsReconfirm:false})}/></label>
             <label>單尾照片（選填）<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>updateRow(row.id,{photo:e.target.files?.[0]||null})}/></label>
           </div>

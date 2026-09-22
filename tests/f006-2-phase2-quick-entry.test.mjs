@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
+import {gramsFromJinLiang} from '../lib/weighted-quick-entry.mjs';
 
 const f0061=readFileSync(new URL('../supabase/f006-1-phase2-pr-a-database-foundation.sql',import.meta.url),'utf8');
 const f0062=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql',import.meta.url),'utf8');
@@ -197,6 +198,22 @@ test('database submission conflict creates no batch or stock and consumes no sto
       /quick_entry_idempotency_conflict/);
     const after=await quickEntryPersistenceSnapshot(db);
     assert.deepEqual(after,before);
+  } finally {await db.close();}
+});
+
+test('decimal liang reaches the weighted stock RPC only as canonical integer grams with tier pricing',async()=>{
+  const {db,today,freshnessVersion}=await fixture();
+  try {
+    const [tier]=await q(db,'select id from phase2_weight_pricing_tiers where lower_bound_g=300');
+    const grams=gramsFromJinLiang(0,12.3);
+    assert.equal(grams,461);
+    const [batch]=await q(db,'with created as materialized (select admin_create_weighted_stock_batch($1,$2,$3) batch) select (batch).* from created',
+      [crypto.randomUUID(),[item(grams,today,null,false,tier.id,369)],freshnessVersion]);
+    const [stock]=await q(db,'select raw_weight_g,pricing_tier_id,system_base_price,t0_base_price from phase2_weighted_stock where batch_id=$1',[batch.id]);
+    assert.deepEqual(stock,{raw_weight_g:461,pricing_tier_id:tier.id,system_base_price:369,t0_base_price:369});
+    assert.equal(Number.isInteger(stock.raw_weight_g),true);
+    await assert.rejects(q(db,'select admin_create_weighted_stock_batch($1,$2,$3)',
+      [crypto.randomUUID(),[item(461.25,today,null,false,tier.id,369)],freshnessVersion]),/quick_entry_invalid_integer/);
   } finally {await db.close();}
 });
 

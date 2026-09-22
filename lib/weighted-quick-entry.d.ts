@@ -7,6 +7,8 @@ export type RowQuote = {tier:WeightedTier|null;system:number|null;base:number|nu
 export function taiwanDate(now?:Date):string;
 export function dayOffset(fishDate:string,today:string):number|null;
 export function gramsFromJinLiang(jin:number,liang:number):number|null;
+export function jinLiangFromGrams(grams:number):{jin:number;liang:number}|null;
+export function jinLiangInputsForGrams(grams:number,jin:string,liang:string):{jin:string;liang:string};
 export function gramsLabel(grams:number):string;
 export function matchedTier(tiers:WeightedTier[],productId:string,grams:number):WeightedTier|null;
 export function systemBasePrice(grams:number,pricePerJin:number):number|null;

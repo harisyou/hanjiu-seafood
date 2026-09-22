@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {dayOffset,duplicateWeightWarnings,gramsFromJinLiang,matchedTier,manualConfirmationRequired,
+import {readFileSync} from 'node:fs';
+import {dayOffset,duplicateWeightWarnings,gramsFromJinLiang,jinLiangFromGrams,jinLiangInputsForGrams,matchedTier,manualConfirmationRequired,
   rowQuote,systemBasePrice} from '../lib/weighted-quick-entry.mjs';
 
 const product={id:'fish',name:'赤棕',inventory_mode:'SINGLE_WEIGHTED',common_weight_min_g:250,common_weight_max_g:900};
@@ -12,6 +13,7 @@ const tiers=[
 const days=[{day_offset:0,multiplier:1},{day_offset:1,multiplier:.95},{day_offset:2,multiplier:.90}];
 const policy={max_sale_day:2,version:1,max_unconfirmed_deviation_ratio:null};
 const base={product_id:'fish',raw_weight_g:420,fish_date:'2026-09-18',manual_base_price:null,manual_price_confirmed:false};
+const quickEntryPage=readFileSync(new URL('../app/admin/weighted/quick-entry/page.tsx',import.meta.url),'utf8');
 
 test('tier boundaries, disabled tiers, grams/jin/liang and NTD rounding',()=>{
   assert.equal(matchedTier(tiers,'fish',300)?.id,'one');
@@ -23,6 +25,41 @@ test('tier boundaries, disabled tiers, grams/jin/liang and NTD rounding',()=>{
   assert.equal(gramsFromJinLiang(1,16),null);
   assert.equal(systemBasePrice(520,480),416);
   assert.equal(systemBasePrice(401,450),301);
+});
+
+test('decimal liang rounds to canonical integer grams and enters the existing price tier',()=>{
+  assert.equal(gramsFromJinLiang(0,12.3),461);
+  assert.equal(gramsFromJinLiang(1,0),600);
+  assert.equal(gramsFromJinLiang(1,15.2),1170);
+  assert.equal(gramsFromJinLiang(0,15.9),596);
+  for(const [jin,liang] of [[0,16],[0,-0.1],[-1,12.3],[1.5,2],[0,Infinity]]){
+    assert.equal(gramsFromJinLiang(jin,liang),null);
+  }
+  const grams=gramsFromJinLiang(0,12.3);
+  const quote=rowQuote({...base,raw_weight_g:grams},product,tiers,days,policy,'2026-09-18');
+  assert.equal(quote.tier?.id,'one');
+  assert.equal(quote.system,369);
+  assert.deepEqual(quote.errors,[]);
+  assert.equal(Number.isInteger(grams),true);
+});
+
+test('integer grams can return to jin and decimal liang inputs without changing canonical weight',()=>{
+  for(const grams of [1,461,462,596,599,600,1170]){
+    const parts=jinLiangFromGrams(grams);
+    assert.ok(parts);
+    assert.equal(gramsFromJinLiang(parts.jin,parts.liang),grams);
+  }
+  assert.equal(jinLiangFromGrams(0),null);
+  assert.deepEqual(jinLiangInputsForGrams(461,'0','12.3'),{jin:'0',liang:'12.3'});
+  assert.deepEqual(jinLiangInputsForGrams(600,'0','12.3'),{jin:'1',liang:'0'});
+});
+
+test('quick-entry liang input accepts decimals and sends only canonical grams to the RPC',()=>{
+  assert.match(quickEntryPage,/兩（0–未滿 16）<input type="number" min="0" step="any" inputMode="decimal"/);
+  assert.match(quickEntryPage,/changeWeightMode\(row,e\.target\.value/);
+  assert.match(quickEntryPage,/jinLiangInputsForGrams\(Number\(row\.raw_weight_g\),row\.jin,row\.liang\)/);
+  assert.match(quickEntryPage,/raw_weight_g:Number\(row\.raw_weight_g\)/);
+  assert.doesNotMatch(quickEntryPage,/p_items:[^\n]*liang/);
 });
 
 test('row quote uses each fish date and effective manual T+0 base',()=>{
