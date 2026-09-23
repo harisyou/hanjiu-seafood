@@ -559,16 +559,17 @@ test('controlled weighted-stock unlist and relist actions preserve snapshots, en
       item(420,date.yesterday,450,false,tier.id,336),
       item(430,date.yesterday,null,false,tier.id,344),
       item(440,today,null,false,tier.id,352),
-      item(450,today,null,false,tier.id,360)
+      item(450,today,null,false,tier.id,360),
+      item(460,today,null,false,tier.id,368)
     ];
     const [batch]=await q(db,'with created as materialized (select admin_create_weighted_stock_batch($1,$2,$3) batch) select (batch).* from created',
       [crypto.randomUUID(),items,freshnessVersion]);
     const stocks=await q(db,'select * from phase2_weighted_stock where batch_id=$1 order by batch_line_no',[batch.id]);
     const target=stocks[0];
-    const snapshot={stock_code:target.stock_code,fish_date:target.fish_date,raw_weight_g:target.raw_weight_g,
-      pricing_tier_id:target.pricing_tier_id,price_per_jin_snapshot:target.price_per_jin_snapshot,
-      system_base_price:target.system_base_price,manual_base_price:target.manual_base_price,
-      t0_base_price:target.t0_base_price,batch_id:target.batch_id};
+    const immutableKeys=['id','product_id','stock_code','fish_date','batch_reference','raw_weight_g',
+      'representative_image_id','order_id','order_item_id','pricing_tier_id','price_per_jin_snapshot',
+      'system_base_price','manual_base_price','manual_price_confirmed','t0_base_price','batch_id','batch_line_no','created_at'];
+    const snapshot=Object.fromEntries(immutableKeys.map(key=>[key,target[key]]));
 
     await assert.rejects(q(db,'select admin_unlist_weighted_stock($1,$2,$3)',[target.id,target.version,'   ']),/phase2_change_reason_required/);
     const [unlisted]=await q(db,'with changed as materialized (select admin_unlist_weighted_stock($1,$2,$3) stock) select (stock).* from changed',
@@ -606,20 +607,40 @@ test('controlled weighted-stock unlist and relist actions preserve snapshots, en
     assert.equal((await q(db,'select status from phase2_weighted_stock where id=$1',[expiring.id]))[0].status,'manually_unlisted');
     assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where entity_id=$1 and action='weighted_stock_relisted'",[expiring.id]))[0].n,0);
 
-    await db.exec("set app.phase2_stock_action_authorized='true'");
+    await db.exec('alter table phase2_weighted_stock disable trigger phase2_stock_update_guard');
     await q(db,"update phase2_weighted_stock set status='reserved' where id=$1",[stocks[2].id]);
     await q(db,"update phase2_weighted_stock set status='sold' where id=$1",[stocks[3].id]);
-    await db.exec("set app.phase2_stock_action_authorized=''");
-    for(const invalid of stocks.slice(2)){
+    await db.exec('alter table phase2_weighted_stock enable trigger phase2_stock_update_guard');
+    for(const invalid of stocks.slice(2,4)){
       const [row]=await q(db,'select version,status from phase2_weighted_stock where id=$1',[invalid.id]);
       await assert.rejects(q(db,'select admin_unlist_weighted_stock($1,$2,$3)',[invalid.id,row.version,'非法繞過']),/weighted_stock_unlist_invalid_status/);
       await assert.rejects(q(db,'select admin_relist_weighted_stock($1,$2,$3)',[invalid.id,row.version,'非法繞過']),/weighted_stock_relist_invalid_status/);
     }
     await assert.rejects(q(db,"update phase2_weighted_stock set status='manually_unlisted' where id=$1",[target.id]),/weighted_stock_action_or_correction_required/);
-    const [rights]=await q(db,"select has_table_privilege('authenticated','public.phase2_weighted_stock','UPDATE') direct_update, has_function_privilege('authenticated','public.admin_unlist_weighted_stock(uuid,integer,text)','EXECUTE') unlist_rpc, has_function_privilege('authenticated','public.admin_relist_weighted_stock(uuid,integer,text)','EXECUTE') relist_rpc");
-    assert.deepEqual(rights,{direct_update:false,unlist_rpc:true,relist_rpc:true});
+    await db.exec("select set_config('app.phase2_stock_action_authorized','true',false)");
+    await assert.rejects(q(db,"update phase2_weighted_stock set status='manually_unlisted' where id=$1",[target.id]),/weighted_stock_action_or_correction_required/);
+    await assert.rejects(q(db,"update phase2_weighted_stock set order_id=gen_random_uuid() where id=$1",[target.id]),/weighted_stock_action_or_correction_required/);
+    const [rights]=await q(db,"select has_table_privilege('authenticated','public.phase2_weighted_stock','UPDATE') direct_update, has_table_privilege('authenticated','public.phase2_weighted_stock_action_tokens','SELECT,INSERT,UPDATE,DELETE') token_access, has_function_privilege('authenticated','public.admin_unlist_weighted_stock(uuid,integer,text)','EXECUTE') unlist_rpc, has_function_privilege('authenticated','public.admin_relist_weighted_stock(uuid,integer,text)','EXECUTE') relist_rpc");
+    assert.deepEqual(rights,{direct_update:false,token_access:false,unlist_rpc:true,relist_rpc:true});
+    await db.exec('set role authenticated');
+    await db.exec("select set_config('app.phase2_stock_action_authorized','true',false)");
+    await assert.rejects(q(db,"update phase2_weighted_stock set status='manually_unlisted' where id=$1",[target.id]),/permission denied/);
+    await db.exec('reset role');
     await db.exec("set test.admin='false'");
     await assert.rejects(q(db,'select admin_unlist_weighted_stock($1,$2,$3)',[target.id,relisted.version,'非管理員']),/admin_required/);
+
+    const failureStock=stocks[4];
+    await db.exec(`create function test_reject_stock_action_audit() returns trigger language plpgsql as $$
+      begin if new.action='weighted_stock_manually_unlisted' then raise exception 'simulated_audit_failure'; end if; return new; end $$;
+      create trigger test_reject_stock_action_audit before insert on phase2_audit_events
+      for each row execute function test_reject_stock_action_audit();`);
+    await db.exec("set test.admin='true'");
+    await assert.rejects(q(db,'select admin_unlist_weighted_stock($1,$2,$3)',[failureStock.id,failureStock.version,'測試 rollback']),/simulated_audit_failure/);
+    await db.exec('drop trigger test_reject_stock_action_audit on phase2_audit_events; drop function test_reject_stock_action_audit()');
+    const [afterFailure]=await q(db,'select status,version from phase2_weighted_stock where id=$1',[failureStock.id]);
+    assert.deepEqual(afterFailure,{status:'sellable',version:failureStock.version});
+    assert.equal((await q(db,'select count(*)::integer n from phase2_weighted_stock_action_tokens'))[0].n,0);
+    await assert.rejects(q(db,"update phase2_weighted_stock set status='manually_unlisted' where id=$1",[failureStock.id]),/weighted_stock_action_or_correction_required/);
   } finally {await db.close();}
 });
 
@@ -628,6 +649,13 @@ test('availability action migration and UI stay isolated from checkout, ledger a
   assert.match(f0063,/admin_relist_weighted_stock/);
   assert.match(f0063,/weighted_stock_manually_unlisted/);
   assert.match(f0063,/weighted_stock_relisted/);
+  assert.doesNotMatch(f0063,/current_setting\s*\(\s*'app\.phase2_stock_action_authorized'|set_config\s*\(\s*'app\.phase2_stock_action_authorized'/i);
+  for(const field of ['product_id','stock_code','fish_date','raw_weight_g','pricing_tier_id','price_per_jin_snapshot',
+    'system_base_price','manual_base_price','manual_price_confirmed','t0_base_price','batch_id','batch_line_no',
+    'order_id','order_item_id'])assert.match(f0063,new RegExp(`new\\.${field} is distinct from old\\.${field}`),field);
+  assert.match(f0063,/representative_image_product_mismatch/);
+  assert.match(f0063,/new\.version := old\.version\+1/);
+  assert.match(f0063,/new\.updated_at := clock_timestamp\(\)/);
   assert.doesNotMatch(f0063,/\b(?:insert\s+into|update|delete\s+from|alter\s+table)\s+public\.(?:orders|order_items|inventory_movements|order_payments|order_payment_reversals|product_variants)\b/i);
   assert.doesNotMatch(f0063,/create\s+or\s+replace\s+function\s+public\.(?:create_checkout_order|admin_cancel_order|log_inventory_movement)/i);
   assert.match(quickEntryPage,/admin_create_weighted_stock_batch/);

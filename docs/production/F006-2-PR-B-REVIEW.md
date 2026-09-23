@@ -186,9 +186,16 @@ day against the current global freshness policy and matching day multiplier.
 It records the effective day, policy version, multiplier and current price in
 the audit event while preserving every creation-time price/tier/manual snapshot.
 Expired, sold, reserved and all other states cannot use these actions. Browser
-roles retain no direct UPDATE privilege; the stock update trigger accepts a
-status transition only inside the controlled RPC context. Codex does not apply
-this migration to Production; the owner must review and run it once after the
+roles retain no direct UPDATE privilege. The trigger does not trust or consult
+a GUC: each RPC creates an unguessable capability in a table with no browser
+privileges, scoped to the current backend PID, transaction ID, stock ID and
+exact old/new status. The trigger requires the matching private row, and the
+RPC deletes it immediately after its one update; an exception rolls the row
+back with the transaction. Caller `SET`/`set_config`, connection pooling,
+nested statements and a capability for a different stock/transition therefore
+cannot authorize an update. Order links
+remain unconditionally immutable in this migration. Codex does not apply this
+migration to Production; the owner must review and run it once after the
 already-applied F006-2 migration.
 
 ## Explicitly deferred to a later PR
