@@ -14,6 +14,7 @@ type Product={id:string;name:string;image_url:string|null};
 type Batch={id:string;name:string};
 type Photo={stock_id:string;storage_path:string};
 const money=(price:number|null)=>price===null?"不可售":`NT$${price.toLocaleString("zh-TW")}`;
+const statusLabel=(status:string)=>status==="sellable"?"可售":status==="manually_unlisted"?"手動下架":status;
 
 function WeightedStockManagementContent(){
   const db=useMemo(()=>createClient(),[]);const params=useSearchParams();const batchFilter=params.get("batch")||"";
@@ -58,7 +59,7 @@ function WeightedStockManagementContent(){
     <p>顯示 {visible.length} 尾（最近 300 尾）；目前價格依台灣日期與即時 T+N 規則計算。</p>
     <div className="weightedStockCards">{visible.map(stock=><Link className="panel weightedStockCard" key={stock.id} href={`/admin/weighted/${stock.id}`}>
       <div className="weightedStockImage">{photo(stock)?<img src={photo(stock)!} alt="單尾魚貨或商品主圖"/>:<span>🐟</span>}</div>
-      <div><strong>{stock.stock_code}</strong><h2>{products.find(p=>p.id===stock.product_id)?.name||"商品資料不可用"}</h2><p>{stock.raw_weight_g}g｜魚貨日 {stock.fish_date}｜T+{dayOffset(stock.fish_date,today)??"?"}</p><p>系統基價 {money(stock.system_base_price)}｜T+0 {money(stock.t0_base_price)}</p><p>目前售價 <b>{money(current(stock))}</b>｜{stock.status}</p><small>{batches.find(batch=>batch.id===stock.batch_id)?.name||"未歸批"}</small></div>
+      <div><strong>{stock.stock_code}</strong><h2>{products.find(p=>p.id===stock.product_id)?.name||"商品資料不可用"}</h2><p>{stock.raw_weight_g}g｜魚貨日 {stock.fish_date}｜T+{dayOffset(stock.fish_date,today)??"?"}</p><p>系統基價 {money(stock.system_base_price)}｜T+0 {money(stock.t0_base_price)}</p><p>目前售價 <b>{money(current(stock))}</b>｜{statusLabel(stock.status)}</p><small>{batches.find(batch=>batch.id===stock.batch_id)?.name||"未歸批"}</small></div>
     </Link>)}{visible.length===0&&<section className="panel">沒有符合條件的單尾現貨。</section>}</div>
   </main>;
 }

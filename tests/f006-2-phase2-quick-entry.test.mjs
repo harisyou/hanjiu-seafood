@@ -7,6 +7,7 @@ import {saveOptionalStockPhotos} from '../lib/weighted-stock-photo.mjs';
 
 const f0061=readFileSync(new URL('../supabase/f006-1-phase2-pr-a-database-foundation.sql',import.meta.url),'utf8');
 const f0062=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql',import.meta.url),'utf8');
+const f0063=readFileSync(new URL('../supabase/f006-3-phase2-weighted-stock-availability-actions.sql',import.meta.url),'utf8');
 const preflight=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-preflight.sql',import.meta.url),'utf8');
 const postVerify=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-post-verify.sql',import.meta.url),'utf8');
 const quickEntryPage=readFileSync(new URL('../app/admin/weighted/quick-entry/page.tsx',import.meta.url),'utf8');
@@ -61,7 +62,7 @@ test('F006-2 verification scripts are SELECT-only and require explicit saved bas
   assert.doesNotMatch(f0062,/\b(?:create\s+or\s+replace\s+function|alter\s+table|update|delete\s+from)\s+public\.(?:create_checkout_order|orders|order_items|inventory_movements|order_payments|order_payment_reversals)\b/i);
 });
 
-async function fixture({priorStock=false,stopAtF0061=false}={}){
+async function fixture({priorStock=false,stopAtF0061=false,availabilityActions=false}={}){
   const db=new PGlite();
   await db.exec(`create role anon; create role authenticated; create schema auth; create schema storage;
     create function auth.uid() returns uuid language sql stable as $$select '80000000-0000-4000-8000-000000000001'::uuid$$;
@@ -91,6 +92,7 @@ async function fixture({priorStock=false,stopAtF0061=false}={}){
     weightedBaseline=(await q(db,preflightStockDigestSql))[0];
   }
   await db.exec(f0062);
+  if(availabilityActions)await db.exec(f0063);
   await db.exec("set test.admin='true'; set app.phase2_reason='initial setup'");
   const timestamp=(await q(db,'select updated_at from products where id=$1',[product]))[0].updated_at;
   await q(db,'select admin_update_weighted_product_settings($1,$2,$3,$4,$5,$6)',[product,timestamp,'SINGLE_WEIGHTED',250,900,'enable weighed stock']);
@@ -546,4 +548,93 @@ test('server freshness uses each past fish date and policy-enforced manual confi
     const [saved]=await q(db,'select system_base_price,manual_base_price,t0_base_price from phase2_weighted_stock where batch_id=$1',[manualBatch.id]);
     assert.equal(saved.system_base_price,336);assert.equal(saved.manual_base_price,450);assert.equal(saved.t0_base_price,450);
   } finally {await db.close();}
+});
+
+test('controlled weighted-stock unlist and relist actions preserve snapshots, enforce freshness, concurrency and audit',async()=>{
+  const {db,today,freshnessVersion}=await fixture({availabilityActions:true});
+  try {
+    const [tier]=await q(db,'select id from phase2_weight_pricing_tiers where lower_bound_g=300');
+    const [date]=await q(db,"select ((now() at time zone 'Asia/Taipei')::date-1)::text yesterday");
+    const items=[
+      item(420,date.yesterday,450,false,tier.id,336),
+      item(430,date.yesterday,null,false,tier.id,344),
+      item(440,today,null,false,tier.id,352),
+      item(450,today,null,false,tier.id,360)
+    ];
+    const [batch]=await q(db,'with created as materialized (select admin_create_weighted_stock_batch($1,$2,$3) batch) select (batch).* from created',
+      [crypto.randomUUID(),items,freshnessVersion]);
+    const stocks=await q(db,'select * from phase2_weighted_stock where batch_id=$1 order by batch_line_no',[batch.id]);
+    const target=stocks[0];
+    const snapshot={stock_code:target.stock_code,fish_date:target.fish_date,raw_weight_g:target.raw_weight_g,
+      pricing_tier_id:target.pricing_tier_id,price_per_jin_snapshot:target.price_per_jin_snapshot,
+      system_base_price:target.system_base_price,manual_base_price:target.manual_base_price,
+      t0_base_price:target.t0_base_price,batch_id:target.batch_id};
+
+    await assert.rejects(q(db,'select admin_unlist_weighted_stock($1,$2,$3)',[target.id,target.version,'   ']),/phase2_change_reason_required/);
+    const [unlisted]=await q(db,'with changed as materialized (select admin_unlist_weighted_stock($1,$2,$3) stock) select (stock).* from changed',
+      [target.id,target.version,'客人現場確認前暫停販售']);
+    assert.equal(unlisted.status,'manually_unlisted');
+    assert.equal(unlisted.version,target.version+1);
+    assert.deepEqual(Object.fromEntries(Object.keys(snapshot).map(key=>[key,unlisted[key]])),snapshot);
+    await assert.rejects(q(db,'select admin_unlist_weighted_stock($1,$2,$3)',[target.id,target.version,'重複下架']),/weighted_stock_version_conflict/);
+    assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where entity_id=$1 and action='weighted_stock_manually_unlisted'",[target.id]))[0].n,1);
+
+    await db.exec("set app.phase2_reason='current freshness price change'");
+    await q(db,'update phase2_freshness_days set multiplier=$1 where day_offset=1',[.90]);
+    const [relisted]=await q(db,'with changed as materialized (select admin_relist_weighted_stock($1,$2,$3) stock) select (stock).* from changed',
+      [target.id,unlisted.version,'重新確認今日仍可販售']);
+    assert.equal(relisted.status,'sellable');
+    assert.equal(relisted.version,unlisted.version+1);
+    assert.deepEqual(Object.fromEntries(Object.keys(snapshot).map(key=>[key,relisted[key]])),snapshot);
+    assert.equal((await q(db,'select phase2_current_weighted_stock_price($1,now()) price',[target.id]))[0].price,405);
+    const [relistAudit]=await q(db,"select actor_id,reason,old_value,new_value,created_at from phase2_audit_events where entity_id=$1 and action='weighted_stock_relisted'",[target.id]);
+    assert.equal(relistAudit.reason,'重新確認今日仍可販售');
+    assert.equal(relistAudit.old_value.status,'manually_unlisted');
+    assert.equal(relistAudit.new_value.status,'sellable');
+    assert.equal(relistAudit.new_value.day_offset,1);
+    assert.equal(relistAudit.new_value.current_price,405);
+    assert.ok(relistAudit.actor_id);assert.ok(relistAudit.created_at);
+    await assert.rejects(q(db,'select admin_relist_weighted_stock($1,$2,$3)',[target.id,unlisted.version,'重複上架']),/weighted_stock_version_conflict/);
+    assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where entity_id=$1 and action='weighted_stock_relisted'",[target.id]))[0].n,1);
+
+    const expiring=stocks[1];
+    const [offline]=await q(db,'with changed as materialized (select admin_unlist_weighted_stock($1,$2,$3) stock) select (stock).* from changed',
+      [expiring.id,expiring.version,'等待確認']);
+    await db.exec("set app.phase2_reason='shorten test policy'");
+    await q(db,'update phase2_freshness_policy set max_sale_day=0 where id=1');
+    await assert.rejects(q(db,'select admin_relist_weighted_stock($1,$2,$3)',[expiring.id,offline.version,'嘗試復活']),/weighted_stock_relist_outside_freshness_window/);
+    assert.equal((await q(db,'select status from phase2_weighted_stock where id=$1',[expiring.id]))[0].status,'manually_unlisted');
+    assert.equal((await q(db,"select count(*)::integer n from phase2_audit_events where entity_id=$1 and action='weighted_stock_relisted'",[expiring.id]))[0].n,0);
+
+    await db.exec("set app.phase2_stock_action_authorized='true'");
+    await q(db,"update phase2_weighted_stock set status='reserved' where id=$1",[stocks[2].id]);
+    await q(db,"update phase2_weighted_stock set status='sold' where id=$1",[stocks[3].id]);
+    await db.exec("set app.phase2_stock_action_authorized=''");
+    for(const invalid of stocks.slice(2)){
+      const [row]=await q(db,'select version,status from phase2_weighted_stock where id=$1',[invalid.id]);
+      await assert.rejects(q(db,'select admin_unlist_weighted_stock($1,$2,$3)',[invalid.id,row.version,'非法繞過']),/weighted_stock_unlist_invalid_status/);
+      await assert.rejects(q(db,'select admin_relist_weighted_stock($1,$2,$3)',[invalid.id,row.version,'非法繞過']),/weighted_stock_relist_invalid_status/);
+    }
+    await assert.rejects(q(db,"update phase2_weighted_stock set status='manually_unlisted' where id=$1",[target.id]),/weighted_stock_action_or_correction_required/);
+    const [rights]=await q(db,"select has_table_privilege('authenticated','public.phase2_weighted_stock','UPDATE') direct_update, has_function_privilege('authenticated','public.admin_unlist_weighted_stock(uuid,integer,text)','EXECUTE') unlist_rpc, has_function_privilege('authenticated','public.admin_relist_weighted_stock(uuid,integer,text)','EXECUTE') relist_rpc");
+    assert.deepEqual(rights,{direct_update:false,unlist_rpc:true,relist_rpc:true});
+    await db.exec("set test.admin='false'");
+    await assert.rejects(q(db,'select admin_unlist_weighted_stock($1,$2,$3)',[target.id,relisted.version,'非管理員']),/admin_required/);
+  } finally {await db.close();}
+});
+
+test('availability action migration and UI stay isolated from checkout, ledger and unrelated stock actions',()=>{
+  assert.match(f0063,/admin_unlist_weighted_stock/);
+  assert.match(f0063,/admin_relist_weighted_stock/);
+  assert.match(f0063,/weighted_stock_manually_unlisted/);
+  assert.match(f0063,/weighted_stock_relisted/);
+  assert.doesNotMatch(f0063,/\b(?:insert\s+into|update|delete\s+from|alter\s+table)\s+public\.(?:orders|order_items|inventory_movements|order_payments|order_payment_reversals|product_variants)\b/i);
+  assert.doesNotMatch(f0063,/create\s+or\s+replace\s+function\s+public\.(?:create_checkout_order|admin_cancel_order|log_inventory_movement)/i);
+  assert.match(quickEntryPage,/admin_create_weighted_stock_batch/);
+  const detail=readFileSync(new URL('../app/admin/weighted/[id]/page.tsx',import.meta.url),'utf8');
+  assert.match(detail,/admin_unlist_weighted_stock/);
+  assert.match(detail,/admin_relist_weighted_stock/);
+  assert.match(detail,/p_expected_version:stock\.version/);
+  assert.match(detail,/目前不可重新上架/);
+  assert.match(detail,/await load\(\)/);
 });

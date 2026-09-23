@@ -172,9 +172,28 @@ be reconstructed now. No additional read-only Production query can recover
 that missing historical baseline; the current count, schema and recent-row
 checks are corroborating evidence only.
 
-## Explicitly deferred to PR-C
+## Controlled availability actions follow-up
 
-The management page is read-only by design. It does not offer fake controls for
-external sale, relist, date correction, quality failure, or advanced batch
-actions. Those require separately reviewed stock-action RPCs and audit rules.
+`f006-3-phase2-weighted-stock-availability-actions.sql` adds the first narrow
+stock actions without opening general stock editing. `sellable` may transition
+only to the existing canonical `manually_unlisted` state, and only that state
+may transition back to `sellable`. Both admin RPCs require a nonblank reason,
+lock the row, compare the caller's expected version, and append one immutable
+audit event. Repeated or stale calls fail before update/audit.
+
+Relist rechecks the product mode/status and the current Asia/Taipei calendar
+day against the current global freshness policy and matching day multiplier.
+It records the effective day, policy version, multiplier and current price in
+the audit event while preserving every creation-time price/tier/manual snapshot.
+Expired, sold, reserved and all other states cannot use these actions. Browser
+roles retain no direct UPDATE privilege; the stock update trigger accepts a
+status transition only inside the controlled RPC context. Codex does not apply
+this migration to Production; the owner must review and run it once after the
+already-applied F006-2 migration.
+
+## Explicitly deferred to a later PR
+
+Apart from the narrow manual unlist/relist flow above, the management page does
+not offer fake controls for external sale, date correction, quality failure, or
+advanced batch actions. Those require separately reviewed stock-action RPCs and audit rules.
 Preorder, allocation, wallet, and mixed fulfillment are outside this PR.

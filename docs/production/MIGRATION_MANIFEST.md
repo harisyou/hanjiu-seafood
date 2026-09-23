@@ -52,12 +52,14 @@ in this order. Do not rerun historical migrations merely because they appear her
     verification summaries passed. Do not rerun.** Historical preflight and
     post-verify remain available. See [Phase 2 PR-A review](F006-1-PR-A-REVIEW.md).
 31. `supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql` — Phase 2 PR-B.
-    **Not applied by Codex.** After PR review and a maintenance window, run
-    `supabase/f006-2-phase2-pr-b-preflight.sql` (read-only), save its current
-    Production counts/function hashes/ledger hashes, and require PASS. The owner
-    may then manually run F006-2 exactly once. Paste those saved baselines into
-    `supabase/f006-2-phase2-pr-b-post-verify.sql` and require all results PASS
-    before exposing the PR-B UI. See [PR-B review](F006-2-PR-B-REVIEW.md).
+    **Already manually applied in Production by the owner; do not rerun.** Its
+    historical preflight/post-verify files remain deployment evidence. See
+    [PR-B review](F006-2-PR-B-REVIEW.md).
+32. `supabase/f006-3-phase2-weighted-stock-availability-actions.sql` — Phase 2
+    controlled manual unlist/relist follow-up. **Not applied by Codex.** Owner
+    reviews and manually runs this forward-only migration once after F006-2.
+    It does not modify checkout, orders, payments, quantity-variant inventory
+    or the inventory movement ledger.
 
 ## Operator rules
 
