@@ -8,6 +8,7 @@ import {saveOptionalStockPhotos} from '../lib/weighted-stock-photo.mjs';
 const f0061=readFileSync(new URL('../supabase/f006-1-phase2-pr-a-database-foundation.sql',import.meta.url),'utf8');
 const f0062=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql',import.meta.url),'utf8');
 const f0063=readFileSync(new URL('../supabase/f006-3-phase2-weighted-stock-availability-actions.sql',import.meta.url),'utf8');
+const f0063Preflight=readFileSync(new URL('../supabase/f006-3-phase2-weighted-stock-availability-actions-preflight.sql',import.meta.url),'utf8');
 const preflight=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-preflight.sql',import.meta.url),'utf8');
 const postVerify=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-post-verify.sql',import.meta.url),'utf8');
 const quickEntryPage=readFileSync(new URL('../app/admin/weighted/quick-entry/page.tsx',import.meta.url),'utf8');
@@ -665,4 +666,22 @@ test('availability action migration and UI stay isolated from checkout, ledger a
   assert.match(detail,/p_expected_version:stock\.version/);
   assert.match(detail,/目前不可重新上架/);
   assert.match(detail,/await load\(\)/);
+});
+
+test('F006-3 preflight is read-only, executes on PostgreSQL and blocks a rerun',async()=>{
+  const body=f0063Preflight.replace(/--[^\n]*/g,'').replace(/'(?:''|[^'])*'/g,"''").trim();
+  assert.equal(/\b(create|alter|drop|insert|update|delete|truncate|grant|revoke|call|do)\b/i.test(body),false);
+  assert.match(f0063Preflight,/from ordered_results\s+order by case when check_name='SUMMARY'/i);
+  const {db}=await fixture();
+  try {
+    const before=await q(db,f0063Preflight);
+    assert.equal(before.at(-1).check_name,'SUMMARY');
+    assert.equal(before.at(-1).result,'PASS');
+    assert.equal(before.some(row=>row.result==='BLOCKER'),false);
+    await db.exec(f0063);
+    const after=await q(db,f0063Preflight);
+    assert.equal(after.at(-1).check_name,'SUMMARY');
+    assert.equal(after.at(-1).result,'BLOCKER');
+    assert.equal(after.find(row=>row.check_name==='f0063_objects_absent').result,'BLOCKER');
+  } finally {await db.close();}
 });

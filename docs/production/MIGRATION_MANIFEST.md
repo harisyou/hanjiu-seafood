@@ -57,7 +57,10 @@ in this order. Do not rerun historical migrations merely because they appear her
     [PR-B review](F006-2-PR-B-REVIEW.md).
 32. `supabase/f006-3-phase2-weighted-stock-availability-actions.sql` — Phase 2
     controlled manual unlist/relist follow-up. **Not applied by Codex.** Owner
-    reviews and manually runs this forward-only migration once after F006-2.
+    first runs the read-only
+    `supabase/f006-3-phase2-weighted-stock-availability-actions-preflight.sql`
+    and requires every row, including SUMMARY, to PASS; then reviews and
+    manually runs this forward-only migration once after F006-2.
     It does not modify checkout, orders, payments, quantity-variant inventory
     or the inventory movement ledger.
 
