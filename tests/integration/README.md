@@ -27,3 +27,21 @@ For the optional F004-3.3 case, also set `F004_3_3_ALLOW_DATABASE_TESTS=1`,
 and the test quantity must be greater than its current inventory (zero inventory
 is valid). The harness sends no `supply_type` and verifies PostgreSQL stores one
 preorder item without changing inventory or creating a movement.
+
+## F006-4 weighted checkout concurrency
+
+`f006-4-postgres-harness.test.mjs` is opt-in and must target a disposable
+PostgreSQL/Supabase database with F006-1 through F006-4 already applied and a
+fresh sellable weighted-stock fixture. It never falls back to Production.
+
+Set `F006_4_ENABLE_POSTGRES_TESTS=1`, `F006_4_TEST_DATABASE_URL`,
+`F006_4_TEST_RACE_STOCK_ID`, `F006_4_TEST_REPLAY_STOCK_ID`, and
+`F006_4_TEST_EXPIRING_ORDER_ID`. The two stock IDs must be distinct, fresh,
+sellable fixtures so the cases are repeatable. The expiring order must be an
+unpaid weighted hold whose database deadline has passed and must still link
+exactly one reserved stock. The harness fails this prerequisite explicitly
+instead of silently skipping or running against a missing order.
+
+F006-4 uses independent `pg` clients for each contender, so every race executes
+through real PostgreSQL server sessions. It does not require a globally installed
+`psql` executable.
