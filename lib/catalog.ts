@@ -15,6 +15,9 @@ export type Product = {
   texture_description?: string | null;
   storage_instructions?: string | null;
   updated_at?: string;
+  inventory_mode?: "SINGLE_WEIGHTED" | "QUANTITY_VARIANT" | null;
+  common_weight_min_g?: number | null;
+  common_weight_max_g?: number | null;
 };
 
 export type ProductImage = {
