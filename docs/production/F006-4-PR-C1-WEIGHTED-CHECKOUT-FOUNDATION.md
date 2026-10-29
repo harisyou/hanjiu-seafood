@@ -135,18 +135,22 @@ freshness recheck, direct-write guards, audit idempotency and cancellation after
 reversal. The full historical test suite protects legacy checkout, preorder,
 payment, reversal, cancellation and ledger behavior.
 
-Real PostgreSQL concurrency cannot be claimed from PGlite. The opt-in
-`tests/integration/f006-4-postgres-harness.test.mjs` uses separate `psql` sessions
-for same/different-key races and payment-versus-expiry. If a disposable PostgreSQL
-fixture is unavailable, these tests are reported as skipped and remain an explicit
-pre-Production verification requirement.
+Real PostgreSQL concurrency is verified separately from PGlite. The opt-in
+`tests/integration/f006-4-postgres-harness.test.mjs` uses independent `pg` client
+sessions for same/different-key races and payment-versus-expiry. It requires an
+explicit disposable database URL, two fresh stocks and a real expired unpaid
+reservation; missing fixture data cannot silently skip the expiry case once the
+harness is enabled.
 
 Local validation on the PR head: focused F006-4 tests **8/8 passed**; full Node
 suite **231/231 passed**; TypeScript `tsc --noEmit` passed; Next.js 15.5.22
-production build passed. The integration command completed with **5 skipped**
-(the existing two F004 cases and three F006-4 cases) because this environment had
-neither `psql` nor an explicitly configured disposable database. No Production
-database was used.
+production build passed. A disposable localhost PostgreSQL 18.4 cluster then ran
+the three F006-4 multi-session races: **3/3 passed, 0 skipped**. Different keys
+created exactly one order/item/reservation; same-key calls returned one order;
+and payment-versus-expiry produced exactly one winner with no deadlock, payment
+fact leak or double stock outcome. The expired fixture was asserted to be unpaid,
+past its database deadline and linked to exactly one reserved stock before the
+race. No Production database was used.
 
 ## Manual acceptance after owner-run SQL
 
