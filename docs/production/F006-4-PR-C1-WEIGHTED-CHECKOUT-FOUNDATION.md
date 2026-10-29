@@ -38,6 +38,25 @@ stock status/linkage, Taipei calendar date, current max-sale-day and multiplier,
 and derives the price from the immutable T+0 snapshot. Any item failure rolls back
 the order, variant deductions, ledger rows, weighted links and audit rows.
 
+## Order amount consistency
+
+F006-4 does not manually patch order totals. Every weighted snapshot is inserted
+into `order_items` with `quantity = 1` and its database-derived current price. The
+existing F003-14 `order_items_recalculate_totals` trigger executes after each
+insert and recomputes `orders.subtotal` from `sum(price * quantity)`; it preserves
+the controlled shipping fee and discount and derives `total_amount` as
+`greatest(subtotal + shipping_fee - discount_amount, 0)`. This applies to both a
+weighted-only order and to the weighted rows appended after the canonical
+seven-argument checkout creates the variant half of a mixed order.
+
+The existing payment RPC still requires the recorded amount to equal the locked
+order `total_amount`. The paid-order financial guard prevents later item/total
+drift. Payment, reversal, cancellation and expiry retain item and amount
+snapshots; they only transition payment/order/stock availability and restore
+eligible inventory. A failure anywhere inside mixed checkout rolls back the
+order, items, trigger-produced totals, variant ledger rows and weighted links in
+the same PostgreSQL transaction.
+
 The new RPC and expiry RPC are revoked from `public`, `anon` and `authenticated`.
 PR-C1 cannot be used by the storefront.
 
@@ -106,7 +125,11 @@ a separately reviewed deployment decision.
 
 ## Verification and known limits
 
-PGlite executes the real F006-1 through F006-4 SQL and verifies reservation,
+PGlite executes the real F003-14, F003-17, F003-18 and F006-1 through F006-4 SQL
+and verifies weighted-only and mixed item sums, shipping/discount derivation,
+exact payment validation, paid-total locking, preserved cancellation/expiry
+snapshots, and full rollback of orders/items/totals/variant ledger/weighted state.
+It also verifies reservation,
 idempotent replay/conflict, mixed-cart rollback/restoration, payment, expiry,
 freshness recheck, direct-write guards, audit idempotency and cancellation after
 reversal. The full historical test suite protects legacy checkout, preorder,

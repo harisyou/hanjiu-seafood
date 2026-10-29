@@ -26,6 +26,21 @@ with checks(check_name,result,detail) as (
     and to_regprocedure('public.admin_cancel_order(uuid)') is not null
     then 'PASS' else 'BLOCKER' end,'latest payment lifecycle and cancellation dependencies'
   union all
+  select 'order_amount_automation',case when
+    to_regprocedure('public.recalculate_order_totals_from_items()') is not null
+    and exists(select 1 from pg_trigger where tgrelid='public.order_items'::regclass
+      and tgname='order_items_recalculate_totals' and not tgisinternal and tgenabled<>'D')
+    and to_regprocedure('public.admin_update_order_totals(uuid,integer,integer)') is not null
+    then 'PASS' else 'BLOCKER' end,'item inserts must recalculate subtotal/total; shipping and discount remain controlled'
+  union all
+  select 'existing_order_amount_consistency',case when not exists(
+    select 1 from public.orders o where
+      (o.subtotal is not null and o.subtotal is distinct from
+        (select coalesce(sum(i.price*i.quantity),0)::integer from public.order_items i where i.order_id=o.id))
+      or (o.subtotal is not null and o.shipping_fee is not null and o.discount_amount is not null
+        and o.total_amount is distinct from greatest(o.subtotal+o.shipping_fee-o.discount_amount,0))
+    ) then 'PASS' else 'BLOCKER' end,'non-null legacy totals must agree with item snapshots and adjustments'
+  union all
   select 'phase2_current_price',case when to_regprocedure('public.phase2_current_weighted_stock_price(uuid,timestamp with time zone)') is not null
     and exists(select 1 from public.phase2_freshness_policy where id=1)
     then 'PASS' else 'BLOCKER' end,'freshness policy and price helper required'
@@ -75,6 +90,7 @@ from public.phase2_weighted_stock s;
 with expected(signature) as (values
  ('create_checkout_order(text,text,text,text,jsonb,text,uuid)'),
  ('admin_record_order_payment(uuid,integer,text,uuid)'),('admin_reverse_order_payment(uuid,text)'),
+ ('recalculate_order_totals_from_items()'),('admin_update_order_totals(uuid,integer,integer)'),
  ('enforce_order_payment_flow()'),('enforce_order_cancellation_flow()'),
  ('log_inventory_movement()'),('phase2_current_weighted_stock_price(uuid,timestamp with time zone)'),
  ('admin_unlist_weighted_stock(uuid,integer,text)'),('admin_relist_weighted_stock(uuid,integer,text)')

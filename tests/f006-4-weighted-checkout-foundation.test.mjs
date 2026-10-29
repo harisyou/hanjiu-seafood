@@ -4,6 +4,9 @@ import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
 
 const f0061=readFileSync(new URL('../supabase/f006-1-phase2-pr-a-database-foundation.sql',import.meta.url),'utf8');
+const f00314=readFileSync(new URL('../supabase/f003-14-order-totals.sql',import.meta.url),'utf8');
+const f00317=readFileSync(new URL('../supabase/f003-17-paid-financial-integrity.sql',import.meta.url),'utf8');
+const f00318=readFileSync(new URL('../supabase/f003-18-repayment-lifecycle.sql',import.meta.url),'utf8');
 const f0062=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql',import.meta.url),'utf8');
 const f0063=readFileSync(new URL('../supabase/f006-3-phase2-weighted-stock-availability-actions.sql',import.meta.url),'utf8');
 const f0064=readFileSync(new URL('../supabase/f006-4-phase2-weighted-checkout-foundation.sql',import.meta.url),'utf8');
@@ -42,8 +45,6 @@ async function fixture(){
     create function public.find_or_create_customer(p_name text,p_phone text,p_email text,p_line text) returns uuid language plpgsql as $$declare x uuid;begin insert into customers(name,phone,email) values(p_name,p_phone,p_email) returning id into x;return x;end$$;
     create function public.enforce_order_cancellation_flow() returns trigger language plpgsql as $$begin if new.status='cancelled' and current_setting('app.order_cancellation_authorized',true) is distinct from 'true' then raise exception 'order_cancellation_rpc_required';end if;return new;end$$;
     create trigger orders_cancellation_guard before update of status on orders for each row execute function enforce_order_cancellation_flow();
-    create function public.recalculate_order_totals_from_items() returns trigger language plpgsql as $$begin update orders set subtotal=(select coalesce(sum(price*quantity),0) from order_items where order_id=new.order_id),total_amount=(select coalesce(sum(price*quantity),0) from order_items where order_id=new.order_id) where id=new.order_id;return new;end$$;
-    create trigger order_items_recalculate_totals after insert on order_items for each row execute function recalculate_order_totals_from_items();
     create function public.log_inventory_movement() returns trigger language plpgsql as $$declare t text:=current_setting('app.inventory_movement_type',true);o uuid:=nullif(current_setting('app.inventory_movement_order_id',true),'')::uuid;begin if tg_op='UPDATE' and new.inventory<>old.inventory then insert into inventory_movements(variant_id,product_id,inventory_delta,quantity_before,quantity_after,movement_type,order_id) values(new.id,new.product_id,new.inventory-old.inventory,old.inventory,new.inventory,t,o);end if;return new;end$$;
     create trigger inventory_variant_movement_ledger after update of inventory on product_variants for each row execute function log_inventory_movement();
     create function public.enforce_order_item_variant_availability() returns trigger language plpgsql as $$begin return new;end$$;
@@ -52,18 +53,14 @@ async function fixture(){
     create trigger order_items_supply_type_snapshot_guard before update of supply_type on order_items for each row execute function enforce_order_item_supply_type_snapshot();
     create function public.enforce_order_payment_flow() returns trigger language plpgsql as $$begin if new.payment_status is distinct from old.payment_status and current_setting('app.order_payment_authorized',true) is distinct from 'true' then raise exception 'order_payment_rpc_required';end if;return new;end$$;
     create trigger orders_payment_guard before update of payment_status on orders for each row execute function enforce_order_payment_flow();
-    create function public.enforce_paid_order_financial_lock() returns trigger language plpgsql as $$begin return new;end$$;
-    create trigger orders_paid_financial_guard before update of subtotal,shipping_fee,discount_amount,total_amount on orders for each row execute function enforce_paid_order_financial_lock();
-    create function public.admin_audit_order_financial_integrity() returns setof text language sql as $$select null::text where false$$;
-    create function public.admin_cancel_order(uuid) returns orders language sql as $$select null::orders$$;
-    create function public.admin_record_order_payment(uuid,integer,text,uuid) returns order_payments language sql as $$select null::order_payments$$;
-    create function public.admin_reverse_order_payment(uuid,text) returns order_payment_reversals language sql as $$select null::order_payment_reversals$$;
+    create function public.admin_record_order_payment(uuid,integer,text) returns order_payments language sql as $$select null::order_payments$$;
   `);
   await db.exec(`create or replace function public.create_checkout_order(p_customer_name text,p_phone text,p_fulfillment text,p_note text,p_items jsonb,p_email text,p_idempotency_key uuid)
     returns uuid language plpgsql security definer set search_path=public,pg_temp as $$declare oid uuid;it jsonb;v record;cid uuid;begin
       cid:=find_or_create_customer(p_customer_name,p_phone,p_email,null);insert into orders(customer_id,customer_name,phone,email,fulfillment,processing,note,checkout_idempotency_key,checkout_request_fingerprint) values(cid,p_customer_name,p_phone,p_email,p_fulfillment,'依品項',p_note,p_idempotency_key,md5(p_items::text)) returning id into oid;
       perform set_config('app.inventory_movement_type','checkout_sale',true);perform set_config('app.inventory_movement_order_id',oid::text,true);
       for it in select value from jsonb_array_elements(p_items) loop select pv.*,p.name product_name into v from product_variants pv join products p on p.id=pv.product_id where pv.id=(it->>'variant_id')::uuid for update of pv;if v.inventory<(it->>'quantity')::integer then raise exception 'variant_unavailable';end if;update product_variants set inventory=inventory-(it->>'quantity')::integer where id=v.id;insert into order_items(order_id,product_id,product_name,variant_id,variant_name,price,quantity,supply_type) values(oid,v.product_id,v.product_name,v.id,v.name,v.price,(it->>'quantity')::integer,'in_stock');end loop;return oid;end$$;`);
+  await db.exec(f00314); await db.exec(f00317); await db.exec(f00318);
   await db.exec(f0061); await db.exec(f0062); await db.exec(f0063);
   await db.exec("set test.admin='true';set app.phase2_reason='setup'");
   const [{updated_at}]=await q(db,'select updated_at from products where id=$1',[product]);
@@ -82,6 +79,13 @@ async function fixture(){
 
 const weightedItem=id=>[{weighted_stock_id:id,processing_option_ids:[]}];
 const identity=()=>['王小明','0912345678','永春市場自取','',[],null,crypto.randomUUID()];
+async function financialSnapshot(db,id){
+  const [row]=await q(db,`select o.subtotal,o.shipping_fee,o.discount_amount,o.total_amount,
+    coalesce(sum(i.price*i.quantity),0)::integer item_total
+    from orders o left join order_items i on i.order_id=o.id where o.id=$1
+    group by o.id,o.subtotal,o.shipping_fee,o.discount_amount,o.total_amount`,[id]);
+  return row;
+}
 
 test('F006-4 migration creates a browser-closed weighted checkout foundation',async()=>{
   const {db,stocks}=await fixture();
@@ -94,6 +98,7 @@ test('F006-4 migration creates a browser-closed weighted checkout foundation',as
     const [stock]=await q(db,'select * from phase2_weighted_stock where id=$1',[stocks[0].id]);
     assert.equal(stock.status,'reserved'); assert.equal(stock.order_id,id); assert.equal(item.weighted_raw_weight_g,420);
     assert.equal(item.price,420); assert.ok(order.weighted_hold_expires_at);
+    assert.deepEqual(await financialSnapshot(db,id),{subtotal:420,shipping_fee:0,discount_amount:0,total_amount:420,item_total:420});
     const [replay]=await q(db,'select phase2_create_checkout_order($1,$2,$3,$4,$5,$6,$7,$8) id',[name,phone,fulfillment,note,variants,weightedItem(stocks[0].id),email,key]);
     assert.equal(replay.id,id); assert.equal((await q(db,'select count(*)::int n from orders'))[0].n,1);
     await assert.rejects(q(db,'select phase2_create_checkout_order($1,$2,$3,$4,$5,$6,$7,$8)',[name,phone,fulfillment,note,variants,[{...weightedItem(stocks[0].id)[0],processing_note:'changed'}],email,key]),/checkout_idempotency_conflict/);
@@ -108,10 +113,12 @@ test('mixed checkout is atomic and expiry restores both inventory models once',a
     const [name,phone,fulfillment,note,,email,key]=identity();
     const variants=[{variant_id:variant,quantity:2,processing_option_ids:[]}];
     const [{id}]=await q(db,'select phase2_create_checkout_order($1,$2,$3,$4,$5,$6,$7,$8) id',[name,phone,fulfillment,note,variants,weightedItem(stocks[0].id),email,key]);
+    assert.deepEqual(await financialSnapshot(db,id),{subtotal:620,shipping_fee:0,discount_amount:0,total_amount:620,item_total:620});
     assert.equal((await q(db,'select inventory from product_variants where id=$1',[variant]))[0].inventory,3);
     await q(db,"select phase2_release_expired_checkout_hold($1,weighted_hold_expires_at+interval '1 second') from orders where id=$1",[id]);
     assert.equal((await q(db,'select inventory from product_variants where id=$1',[variant]))[0].inventory,5);
     assert.equal((await q(db,'select status from phase2_weighted_stock where id=$1',[stocks[0].id]))[0].status,'sellable');
+    assert.deepEqual(await financialSnapshot(db,id),{subtotal:620,shipping_fee:0,discount_amount:0,total_amount:620,item_total:620});
     const before=(await q(db,"select count(*)::int n from phase2_audit_events where entity_id=$1 and action='weighted_stock_hold_released'",[stocks[0].id]))[0].n;
     await q(db,"select phase2_release_expired_checkout_hold($1,weighted_hold_expires_at+interval '2 seconds') from orders where id=$1",[id]);
     assert.equal((await q(db,'select inventory from product_variants where id=$1',[variant]))[0].inventory,5);
@@ -119,14 +126,21 @@ test('mixed checkout is atomic and expiry restores both inventory models once',a
   }finally{await db.close();}
 });
 
-test('payment atomically marks reserved weighted stock sold and expired payment loses the race',async()=>{
+test('shipping, discount, and exact payment stay consistent with mixed item totals',async()=>{
   const {db,stocks}=await fixture();
   try{
-    const [name,phone,fulfillment,note,variants,email,key]=identity();
+    const [name,phone,fulfillment,note,,email,key]=identity();
+    const variants=[{variant_id:variant,quantity:2,processing_option_ids:[]}];
     const [{id}]=await q(db,'select phase2_create_checkout_order($1,$2,$3,$4,$5,$6,$7,$8) id',[name,phone,fulfillment,note,variants,weightedItem(stocks[0].id),email,key]);
-    await db.exec("set app.order_payment_authorized='true'");
-    await q(db,"update orders set payment_status='paid' where id=$1",[id]);
+    await q(db,'select admin_update_order_totals($1,$2,$3)',[id,80,20]);
+    assert.deepEqual(await financialSnapshot(db,id),{subtotal:620,shipping_fee:80,discount_amount:20,total_amount:680,item_total:620});
+    await assert.rejects(q(db,"select admin_record_order_payment($1,$2,'cash',$3)",[id,679,crypto.randomUUID()]),/payment_amount_mismatch/);
+    assert.equal((await q(db,'select count(*)::int n from order_payments where order_id=$1',[id]))[0].n,0);
+    await q(db,"select admin_record_order_payment($1,$2,'cash',$3)",[id,680,crypto.randomUUID()]);
     assert.equal((await q(db,'select status from phase2_weighted_stock where id=$1',[stocks[0].id]))[0].status,'sold');
+    assert.deepEqual(await financialSnapshot(db,id),{subtotal:620,shipping_fee:80,discount_amount:20,total_amount:680,item_total:620});
+    assert.equal((await q(db,'select amount from order_payments where order_id=$1',[id]))[0].amount,680);
+    await assert.rejects(q(db,'select admin_update_order_totals($1,$2,$3)',[id,90,20]),/paid_order_totals_locked/);
     await assert.rejects(q(db,"select phase2_release_expired_checkout_hold($1,weighted_hold_expires_at+interval '1 second') from orders where id=$1",[id]),/paid_order_hold_not_releasable/);
   }finally{await db.close();}
 });
@@ -134,10 +148,14 @@ test('payment atomically marks reserved weighted stock sold and expired payment 
 test('failed multi-stock checkout rolls back every required fact',async()=>{
   const {db,stocks}=await fixture();
   try{
-    const [name,phone,fulfillment,note,variants,email,key]=identity();
+    const [name,phone,fulfillment,note,,email,key]=identity();
+    const variants=[{variant_id:variant,quantity:2,processing_option_ids:[]}];
     const missing=crypto.randomUUID();
     await assert.rejects(q(db,'select phase2_create_checkout_order($1,$2,$3,$4,$5,$6,$7,$8)',[name,phone,fulfillment,note,variants,[...weightedItem(stocks[0].id),...weightedItem(missing)],email,key]),/weighted_stock_unavailable/);
     assert.equal((await q(db,'select count(*)::int n from orders'))[0].n,0);
+    assert.equal((await q(db,'select count(*)::int n from order_items'))[0].n,0);
+    assert.equal((await q(db,'select count(*)::int n from inventory_movements'))[0].n,0);
+    assert.equal((await q(db,'select inventory from product_variants where id=$1',[variant]))[0].inventory,5);
     assert.equal((await q(db,'select status from phase2_weighted_stock where id=$1',[stocks[0].id]))[0].status,'sellable');
   }finally{await db.close();}
 });
@@ -167,18 +185,19 @@ test('expiry revalidates current freshness and cannot revive an old fish',async(
   }finally{await db.close();}
 });
 
-test('payment reversal followed by existing admin cancellation safely releases sold weighted stock',async()=>{
+test('payment reversal and cancellation preserve immutable order amounts while releasing stock',async()=>{
   const {db,stocks}=await fixture();
   try{
     const [name,phone,fulfillment,note,variants,email,key]=identity();
     const [{id}]=await q(db,'select phase2_create_checkout_order($1,$2,$3,$4,$5,$6,$7,$8) id',[name,phone,fulfillment,note,variants,weightedItem(stocks[0].id),email,key]);
-    await db.exec("set app.order_payment_authorized='true'");
-    await q(db,"update orders set payment_status='paid' where id=$1",[id]);
-    await q(db,"update orders set payment_status='unpaid' where id=$1",[id]);
+    await q(db,"select admin_record_order_payment($1,$2,'cash',$3)",[id,420,crypto.randomUUID()]);
+    await q(db,"select admin_reverse_order_payment($1,'customer request')",[id]);
     await q(db,'select admin_cancel_order($1)',[id]);
     assert.equal((await q(db,'select status from orders where id=$1',[id]))[0].status,'cancelled');
     const [stock]=await q(db,'select status,order_id,order_item_id from phase2_weighted_stock where id=$1',[stocks[0].id]);
     assert.deepEqual(stock,{status:'sellable',order_id:null,order_item_id:null});
+    assert.deepEqual(await financialSnapshot(db,id),{subtotal:420,shipping_fee:0,discount_amount:0,total_amount:420,item_total:420});
+    assert.equal((await q(db,'select count(*)::int n from order_items where order_id=$1',[id]))[0].n,1);
   }finally{await db.close();}
 });
 

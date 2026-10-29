@@ -46,6 +46,17 @@ with checks(check_name,result,detail) as (
   select 'weighted_snapshot_links_valid',case when not exists(select 1 from public.order_items i left join public.phase2_weighted_stock s on s.id=i.weighted_stock_id
     where i.weighted_stock_id is not null and (s.id is null or i.quantity<>1 or i.variant_id is not null or i.price<=0 or i.weighted_raw_weight_g<=0))
     then 'PASS' else 'BLOCKER' end,'weighted item snapshots are structurally valid'
+  union all
+  select 'order_amount_consistency',case when
+    to_regprocedure('public.recalculate_order_totals_from_items()') is not null
+    and exists(select 1 from pg_trigger where tgrelid='public.order_items'::regclass
+      and tgname='order_items_recalculate_totals' and not tgisinternal and tgenabled<>'D')
+    and not exists(select 1 from public.orders o where
+      (o.subtotal is not null and o.subtotal is distinct from
+        (select coalesce(sum(i.price*i.quantity),0)::integer from public.order_items i where i.order_id=o.id))
+      or (o.subtotal is not null and o.shipping_fee is not null and o.discount_amount is not null
+        and o.total_amount is distinct from greatest(o.subtotal+o.shipping_fee-o.discount_amount,0)))
+    then 'PASS' else 'BLOCKER' end,'order subtotal equals item snapshots and total includes shipping/discount exactly once'
 )
 select * from (
   select check_name,result,detail,1 sort_key from checks
@@ -86,6 +97,7 @@ select case when expected.orders_md5 is null or expected.items_md5 is null or ex
 with expected(signature,expected_md5) as (values
  ('create_checkout_order(text,text,text,text,jsonb,text,uuid)',null::text),
  ('admin_record_order_payment(uuid,integer,text,uuid)',null::text),('admin_reverse_order_payment(uuid,text)',null::text),
+ ('recalculate_order_totals_from_items()',null::text),('admin_update_order_totals(uuid,integer,integer)',null::text),
  ('enforce_order_payment_flow()',null::text),('enforce_order_cancellation_flow()',null::text),
  ('log_inventory_movement()',null::text),('phase2_current_weighted_stock_price(uuid,timestamp with time zone)',null::text),
  ('admin_unlist_weighted_stock(uuid,integer,text)',null::text),('admin_relist_weighted_stock(uuid,integer,text)',null::text)
