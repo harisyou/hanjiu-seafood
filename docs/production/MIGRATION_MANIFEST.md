@@ -63,6 +63,13 @@ in this order. Do not rerun historical migrations merely because they appear her
     manually runs this forward-only migration once after F006-2.
     It does not modify checkout, orders, payments, quantity-variant inventory
     or the inventory movement ledger.
+33. `supabase/f006-4-phase2-weighted-checkout-foundation.sql` — Phase 2 PR-C1
+    database-only weighted checkout foundation. Forward-only after F006-3; owner
+    first runs `supabase/f006-4-phase2-weighted-checkout-preflight.sql`, saves all
+    baselines, manually applies the migration once, then pastes those values into
+    `supabase/f006-4-phase2-weighted-checkout-post-verify.sql`. The new mixed-cart
+    and expiry RPCs intentionally have no browser grants. See
+    [F006-4 review](F006-4-PR-C1-WEIGHTED-CHECKOUT-FOUNDATION.md).
 
 ## Operator rules
 
