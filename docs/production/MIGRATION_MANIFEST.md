@@ -56,20 +56,23 @@ in this order. Do not rerun historical migrations merely because they appear her
     historical preflight/post-verify files remain deployment evidence. See
     [PR-B review](F006-2-PR-B-REVIEW.md).
 32. `supabase/f006-3-phase2-weighted-stock-availability-actions.sql` — Phase 2
-    controlled manual unlist/relist follow-up. **Not applied by Codex.** Owner
-    first runs the read-only
-    `supabase/f006-3-phase2-weighted-stock-availability-actions-preflight.sql`
-    and requires every row, including SUMMARY, to PASS; then reviews and
-    manually runs this forward-only migration once after F006-2.
+    controlled manual unlist/relist follow-up. **Already manually applied in
+    Production by the owner; do not rerun.** Codex did not execute it.
     It does not modify checkout, orders, payments, quantity-variant inventory
     or the inventory movement ledger.
 33. `supabase/f006-4-phase2-weighted-checkout-foundation.sql` — Phase 2 PR-C1
-    database-only weighted checkout foundation. Forward-only after F006-3; owner
-    first runs `supabase/f006-4-phase2-weighted-checkout-preflight.sql`, saves all
-    baselines, manually applies the migration once, then pastes those values into
-    `supabase/f006-4-phase2-weighted-checkout-post-verify.sql`. The new mixed-cart
-    and expiry RPCs intentionally have no browser grants. See
+    database-only weighted checkout foundation. **Already manually applied in
+    Production by the owner and post-verified; do not rerun.** Codex did not
+    execute it. The mixed-cart and expiry RPCs intentionally have no browser grants. See
     [F006-4 review](F006-4-PR-C1-WEIGHTED-CHECKOUT-FOUNDATION.md).
+34. `supabase/f006-5-phase2-payment-lifecycle-foundation.sql` — Phase 2 PR-C2.1
+    proposed forward-only payment-report, guest access-token hash, same-phone
+    order guard, controlled cancellation, immutable checkout snapshot, and
+    notification-outbox foundation. **Not applied to Production.** The owner must
+    save every result from the read-only preflight, manually review and apply the
+    migration once, then paste the saved baselines into the read-only post-verify.
+    This migration deliberately creates no storefront grant, scheduler, or email
+    provider integration. See [F006-5 review](F006-5-PR-C2-1-REVIEW.md).
 
 ## Operator rules
 
