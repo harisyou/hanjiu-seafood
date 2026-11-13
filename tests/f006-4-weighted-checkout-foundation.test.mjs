@@ -10,8 +10,11 @@ const f00318=readFileSync(new URL('../supabase/f003-18-repayment-lifecycle.sql',
 const f0062=readFileSync(new URL('../supabase/f006-2-phase2-pr-b-weighted-quick-entry.sql',import.meta.url),'utf8');
 const f0063=readFileSync(new URL('../supabase/f006-3-phase2-weighted-stock-availability-actions.sql',import.meta.url),'utf8');
 const f0064=readFileSync(new URL('../supabase/f006-4-phase2-weighted-checkout-foundation.sql',import.meta.url),'utf8');
+const f0065=readFileSync(new URL('../supabase/f006-5-phase2-payment-lifecycle-foundation.sql',import.meta.url),'utf8');
 const preflight=readFileSync(new URL('../supabase/f006-4-phase2-weighted-checkout-preflight.sql',import.meta.url),'utf8');
 const postVerify=readFileSync(new URL('../supabase/f006-4-phase2-weighted-checkout-post-verify.sql',import.meta.url),'utf8');
+const f0065Preflight=readFileSync(new URL('../supabase/f006-5-phase2-payment-lifecycle-preflight.sql',import.meta.url),'utf8');
+const f0065PostVerify=readFileSync(new URL('../supabase/f006-5-phase2-payment-lifecycle-post-verify.sql',import.meta.url),'utf8');
 const product='10000000-0000-4000-8000-000000000001';
 const variantProduct='10000000-0000-4000-8000-000000000002';
 const variant='20000000-0000-4000-8000-000000000001';
@@ -207,4 +210,137 @@ test('F006-4 preflight and post-verify remain read-only',()=>{
     assert.equal(/\b(create|alter|drop|insert|update|delete|truncate|grant|revoke|call|do)\b/i.test(body),false);
     assert.equal(body.split(';').filter(part=>part.trim()).every(part=>/^\s*(with\b|select\b)/i.test(part)),true);
   }
+});
+
+const accessHash=character=>character.repeat(64);
+async function c2Checkout(db,{phone='0912345678',variants=[],weighted=[],hash=accessHash('a'),key=crypto.randomUUID()}={}){
+  const [{id}]=await q(db,'select phase2_create_checkout_order_with_access($1,$2,$3,$4,$5,$6,$7,$8,$9) id',
+    ['王小明',phone,'永春市場自取','',variants,weighted,'buyer@example.com',key,hash]);
+  return {id,key,hash};
+}
+
+test('F006-5 pure variant lifecycle pays and expires without requiring weighted rows',async()=>{
+  const {db}=await fixture();
+  try{
+    await db.exec(f0065Preflight);
+    await db.exec(f0065);
+    await db.exec(f0065PostVerify);
+    const variants=[{variant_id:variant,quantity:2,processing_option_ids:[]}];
+    const first=await c2Checkout(db,{variants,hash:accessHash('1')});
+    assert.equal((await q(db,'select inventory from product_variants where id=$1',[variant]))[0].inventory,3);
+    const [report]=await q(db,'select (phase2_submit_payment_report($1,$2,$3,$4)).*',[first.hash,'12345',200,crypto.randomUUID()]);
+    await q(db,'select admin_confirm_reported_order_payment($1,$2,$3)',[first.id,report.id,crypto.randomUUID()]);
+    assert.equal((await q(db,'select payment_status from orders where id=$1',[first.id]))[0].payment_status,'paid');
+
+    const second=await c2Checkout(db,{phone:'0912345678',variants:[{variant_id:variant,quantity:1,processing_option_ids:[]}],hash:accessHash('2')});
+    await q(db,"select admin_reverse_order_payment($1,'bank correction')",[first.id]);
+    assert.equal((await q(db,'select payment_slot_active from orders where id=$1',[first.id]))[0].payment_slot_active,false);
+    await q(db,"select phase2_release_expired_checkout_hold($1,weighted_hold_expires_at+interval '1 second') from orders where id=$1",[second.id]);
+    assert.equal((await q(db,'select inventory from product_variants where id=$1',[variant]))[0].inventory,3);
+    assert.equal((await q(db,'select status from orders where id=$1',[second.id]))[0].status,'cancelled');
+  }finally{await db.close();}
+});
+
+test('F006-5 preflight and post-verify remain read-only',()=>{
+  for(const sql of [f0065Preflight,f0065PostVerify]){
+    const body=sql.replace(/--[^\n]*/g,'').replace(/'(?:''|[^'])*'/g,"''").trim();
+    assert.equal(/\b(create|alter|drop|insert|update|delete|truncate|grant|revoke|call|do)\b/i.test(body),false);
+    assert.equal(body.split(';').filter(part=>part.trim()).every(part=>/^\s*(with\b|select\b)/i.test(part)),true);
+  }
+});
+
+test('F006-5 blocks a second unfinished order by normalized phone and frees it after customer cancellation',async()=>{
+  const {db}=await fixture();
+  try{
+    await db.exec(f0065);
+    const variants=[{variant_id:variant,quantity:1,processing_option_ids:[]}];
+    const first=await c2Checkout(db,{phone:'+886 912 345 678',variants,hash:accessHash('3')});
+    await assert.rejects(c2Checkout(db,{phone:'0912-345-678',variants,hash:accessHash('4')}),/phone_has_unfinished_payment_order/);
+    const cancelKey=crypto.randomUUID();
+    await q(db,'select phase2_customer_cancel_order($1,$2)',[first.hash,cancelKey]);
+    await q(db,'select phase2_customer_cancel_order($1,$2)',[first.hash,cancelKey]);
+    assert.equal((await q(db,"select count(*)::int n from inventory_movements where order_id=$1 and movement_type='order_cancel_restore'",[first.id]))[0].n,1);
+    const next=await c2Checkout(db,{phone:'0912345678',variants,hash:accessHash('5')});
+    assert.ok(next.id);
+  }finally{await db.close();}
+});
+
+test('F006-5 report, one amendment, email outbox, exception, and next-day confirmation are controlled',async()=>{
+  const {db,stocks}=await fixture();
+  try{
+    await db.exec(f0065);
+    const order=await c2Checkout(db,{weighted:weightedItem(stocks[0].id),hash:accessHash('6')});
+    const reportKey=crypto.randomUUID();
+    const [report]=await q(db,'select (phase2_submit_payment_report($1,$2,$3,$4)).*',[order.hash,'12345',420,reportKey]);
+    const [replay]=await q(db,'select (phase2_submit_payment_report($1,$2,$3,$4)).*',[order.hash,'12345',420,reportKey]);
+    assert.equal(replay.id,report.id);
+    assert.equal((await q(db,'select count(*)::int n from notification_outbox where order_id=$1',[order.id]))[0].n,1);
+    const [amended]=await q(db,'select (phase2_amend_payment_report($1,$2,$3)).*',[order.hash,'54321',crypto.randomUUID()]);
+    assert.equal(amended.version,2);
+    await assert.rejects(q(db,'select phase2_amend_payment_report($1,$2,$3)',[order.hash,'11111',crypto.randomUUID()]),/payment_report_amendment_limit_reached/);
+    await assert.rejects(q(db,'select phase2_customer_cancel_order($1,$2)',[order.hash,crypto.randomUUID()]),/reported_order_customer_cancel_not_allowed/);
+    await q(db,"update order_payment_reports set submitted_at=clock_timestamp()-interval '2 days' where id=$1",[report.id]);
+    await q(db,"update orders set payment_reported_at=clock_timestamp()-interval '2 days',weighted_hold_expires_at=clock_timestamp()-interval '1 day' where id=$1",[order.id]);
+    await q(db,'select admin_mark_payment_report_exception($1,$2,$3,$4)',[order.id,amended.id,'bank mismatch',crypto.randomUUID()]);
+    await assert.rejects(q(db,'select phase2_release_expired_checkout_hold($1,clock_timestamp())',[order.id]),/reported_order_hold_not_releasable/);
+    await q(db,'select admin_confirm_reported_order_payment($1,$2,$3)',[order.id,amended.id,crypto.randomUUID()]);
+    assert.deepEqual((await q(db,'select payment_status,payment_report_status from orders where id=$1',[order.id]))[0],{payment_status:'paid',payment_report_status:'confirmed'});
+    assert.equal((await q(db,'select status from phase2_weighted_stock where id=$1',[stocks[0].id]))[0].status,'sold');
+  }finally{await db.close();}
+});
+
+test('F006-5 locks new checkout items and amounts while preserving legacy admin totals',async()=>{
+  const {db}=await fixture();
+  try{
+    await db.exec(f0065);
+    const variants=[{variant_id:variant,quantity:1,processing_option_ids:[]}];
+    const order=await c2Checkout(db,{variants,hash:accessHash('7')});
+    await assert.rejects(q(db,'select admin_update_order_totals($1,$2,$3)',[order.id,10,0]),/checkout_order_financials_immutable/);
+    await assert.rejects(q(db,'update order_items set quantity=2 where order_id=$1',[order.id]),/checkout_order_items_immutable/);
+    const [name,phone,fulfillment,note,,email,key]=identity();
+    const [{id:legacy}]=await q(db,'select phase2_create_checkout_order($1,$2,$3,$4,$5,$6,$7,$8) id',[name,'0933333333',fulfillment,note,variants,[],email,key]);
+    await q(db,'select admin_update_order_totals($1,$2,$3)',[legacy,20,0]);
+    assert.equal((await q(db,'select total_amount from orders where id=$1',[legacy]))[0].total_amount,120);
+  }finally{await db.close();}
+});
+
+test('F006-5 admin reported cancellation, email revision, reminders, and browser closure are idempotent',async()=>{
+  const {db}=await fixture();
+  try{
+    await db.exec(f0065);
+    const variants=[{variant_id:variant,quantity:1,processing_option_ids:[]}];
+    const order=await c2Checkout(db,{variants,hash:accessHash('8')});
+    const [report]=await q(db,'select (phase2_submit_payment_report($1,$2,$3,$4)).*',[order.hash,'12345',100,crypto.randomUUID()]);
+    await q(db,'select phase2_update_order_email($1,$2,$3)',[order.hash,'new@example.com',crypto.randomUUID()]);
+    const outboxBefore=(await q(db,'select count(*)::int n from notification_outbox where order_id=$1',[order.id]))[0].n;
+    await q(db,'select phase2_update_order_email($1,$2,$3)',[order.hash,'NEW@example.com',crypto.randomUUID()]);
+    assert.equal((await q(db,'select count(*)::int n from notification_outbox where order_id=$1',[order.id]))[0].n,outboxBefore);
+    await q(db,"update orders set payment_reported_at=clock_timestamp()-interval '25 hours' where id=$1",[order.id]);
+    assert.equal((await q(db,'select phase2_enqueue_payment_review_reminders(clock_timestamp()) n'))[0].n,1);
+    assert.equal((await q(db,'select phase2_enqueue_payment_review_reminders(clock_timestamp()) n'))[0].n,0);
+    const lease1=crypto.randomUUID();
+    const [claimed]=await q(db,'select * from phase2_claim_notification_outbox($1,$2,clock_timestamp())',[1,lease1]);
+    assert.equal(claimed.status,'processing'); assert.equal(claimed.attempts,1);
+    await q(db,"select phase2_fail_notification_outbox($1,$2,'temporary_provider_error',clock_timestamp()+interval '1 minute',false)",[claimed.id,lease1]);
+    await q(db,"update notification_outbox set available_at=clock_timestamp()+interval '1 day' where id<>$1 and status='pending'",[claimed.id]);
+    const lease2=crypto.randomUUID();
+    const [reclaimed]=await q(db,"select * from phase2_claim_notification_outbox($1,$2,clock_timestamp()+interval '2 minutes')",[1,lease2]);
+    assert.equal(reclaimed.id,claimed.id); assert.equal(reclaimed.attempts,2);
+    await q(db,"select phase2_complete_notification_outbox($1,$2,'provider-1',clock_timestamp())",[claimed.id,lease2]);
+    await q(db,"select phase2_complete_notification_outbox($1,$2,'provider-1',clock_timestamp())",[claimed.id,lease2]);
+    assert.equal((await q(db,'select status from notification_outbox where id=$1',[claimed.id]))[0].status,'sent');
+    await q(db,'select admin_mark_payment_report_exception($1,$2,$3,$4)',[order.id,report.id,'amount not found',crypto.randomUUID()]);
+    assert.equal((await q(db,'select phase2_enqueue_payment_review_reminders(clock_timestamp()) n'))[0].n,1);
+    const cancelKey=crypto.randomUUID();
+    await q(db,"select admin_cancel_reported_order($1,$2,'customer contacted',$3)",[order.id,report.id,cancelKey]);
+    await q(db,"select admin_cancel_reported_order($1,$2,'customer contacted',$3)",[order.id,report.id,cancelKey]);
+    assert.equal((await q(db,"select count(*)::int n from inventory_movements where order_id=$1 and movement_type='order_cancel_restore'",[order.id]))[0].n,1);
+    const [privileges]=await q(db,`select
+      has_function_privilege('anon','public.phase2_submit_payment_report(text,text,integer,uuid)','execute') anon_submit,
+      has_function_privilege('authenticated','public.phase2_submit_payment_report(text,text,integer,uuid)','execute') auth_submit,
+      has_function_privilege('anon','public.admin_confirm_reported_order_payment(uuid,uuid,uuid)','execute') anon_admin,
+      has_function_privilege('authenticated','public.admin_confirm_reported_order_payment(uuid,uuid,uuid)','execute') auth_admin,
+      has_table_privilege('authenticated','public.order_customer_access_tokens','select') token_read`);
+    assert.deepEqual(privileges,{anon_submit:false,auth_submit:false,anon_admin:false,auth_admin:true,token_read:false});
+  }finally{await db.close();}
 });
