@@ -3,13 +3,12 @@
 The canonical complete ordered list is
 [docs/production/MIGRATION_MANIFEST.md](../docs/production/MIGRATION_MANIFEST.md).
 For Phase 1 follow [F005-1 deployment](../docs/production/F005-1-CATALOG-DEPLOYMENT.md).
-The owner reported F005-1 and F005-1a as already applied during Phase 1 review;
-do not rerun either file. The next proposed, separately reviewed change is
-`f006-1-phase2-pr-a-database-foundation.sql`, **not yet applied or verified in
-Production by Codex**. See [Phase 2 PR-A review](../docs/production/F006-1-PR-A-REVIEW.md).
-Run `f006-1-phase2-pr-a-preflight.sql` read-only before owner deployment; save
-its baseline counts/fingerprints. Compare them afterward with the read-only
-`f006-1-phase2-pr-a-post-verify.sql`, supplying the saved values explicitly.
+The owner reported F005-1, F005-1a and F006-1 through F006-4 as already applied
+and verified in Production; do not rerun any of them. Codex did not execute those
+Production migrations. The next proposed, separately reviewed change is the
+forward-only `f006-5-phase2-payment-lifecycle-foundation.sql`. Follow the canonical
+manifest and F006-5 review; save its read-only preflight baselines and paste them
+explicitly into the read-only post-verify after owner deployment.
 The F004 checklist below is historical feature-specific guidance, not an instruction
 to rerun migrations or reset existing preorder values.
 
