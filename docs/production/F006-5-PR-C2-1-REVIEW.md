@@ -20,7 +20,11 @@ Codex does not execute Production SQL.
 - `notification_outbox` is a provider-neutral transactional outbox. This PR
   enqueues work but never sends Email. Internal claim/complete/fail RPCs use
   bounded batches, `SKIP LOCKED`, scoped leases, retry timestamps, attempt counts,
-  and terminal failure records for a later PR-C2.2 worker.
+  and terminal failure records for a later PR-C2.2 worker. Customer notification
+  jobs carry an expected payment lifecycle state. Claiming work supersedes stale
+  pending/leased jobs after a transition, so pending-review copy cannot be reused
+  for an exception, confirmed payment, or cancelled order. The future worker must
+  render from the claimed notification type and honor lease conflicts before send.
 - `phase2_order_action_tokens` scopes exceptional after-deadline payment and
   reported-order cancellation authorization to one backend, transaction, order,
   action, and current report.
@@ -58,7 +62,11 @@ first, restores only proven legacy `in_stock` deductions through the existing
 inventory ledger context, then releases each weighted reservation after current
 freshness revalidation. Variant-only orders no longer incorrectly require a
 weighted row. Customer cancellation is access-token protected and is allowed only
-before a payment report. Replays do not restore inventory twice.
+before a payment report. Replays do not restore inventory twice. The reported-
+order cancellation trigger rejects the legacy `admin_cancel_order` path for
+`pending` and `exception` reports unless the scoped admin cancellation RPC created
+the transaction-bound authorization row. A trigger rejection rolls the entire
+statement transaction back, including any attempted inventory restoration.
 
 The expiry worker primitive now refuses `pending`, `exception`, or confirmed
 reports. Payment and expiry still serialize on the order row. Payment reversal

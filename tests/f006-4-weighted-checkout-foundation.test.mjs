@@ -286,6 +286,30 @@ test('F006-5 report, one amendment, email outbox, exception, and next-day confir
     await q(db,'select admin_confirm_reported_order_payment($1,$2,$3)',[order.id,amended.id,crypto.randomUUID()]);
     assert.deepEqual((await q(db,'select payment_status,payment_report_status from orders where id=$1',[order.id]))[0],{payment_status:'paid',payment_report_status:'confirmed'});
     assert.equal((await q(db,'select status from phase2_weighted_stock where id=$1',[stocks[0].id]))[0].status,'sold');
+    await assert.rejects(q(db,'select admin_cancel_order($1)',[order.id]),/paid_order_requires_payment_reversal/);
+  }finally{await db.close();}
+});
+
+test('F006-5 email resend tasks are lifecycle-specific and stale tasks are superseded before claim',async()=>{
+  const {db}=await fixture();
+  try{
+    await db.exec(f0065);
+    const order=await c2Checkout(db,{variants:[{variant_id:variant,quantity:1,processing_option_ids:[]}],hash:accessHash('e')});
+    const [report]=await q(db,'select (phase2_submit_payment_report($1,$2,$3,$4)).*',[order.hash,'12345',100,crypto.randomUUID()]);
+    await q(db,'select phase2_update_order_email($1,$2,$3)',[order.hash,'pending@example.com',crypto.randomUUID()]);
+    assert.deepEqual((await q(db,"select distinct notification_type from notification_outbox where order_id=$1 order by 1",[order.id])).map(x=>x.notification_type),['customer_payment_report_received']);
+    await q(db,'select admin_mark_payment_report_exception($1,$2,$3,$4)',[order.id,report.id,'bank mismatch',crypto.randomUUID()]);
+    await q(db,'select phase2_update_order_email($1,$2,$3)',[order.hash,'exception@example.com',crypto.randomUUID()]);
+    assert.equal((await q(db,"select count(*)::int n from notification_outbox where order_id=$1 and notification_type='customer_payment_report_exception' and payload->>'expected_payment_report_status'='exception'",[order.id]))[0].n,1);
+    await q(db,'select admin_confirm_reported_order_payment($1,$2,$3)',[order.id,report.id,crypto.randomUUID()]);
+    await q(db,'select phase2_update_order_email($1,$2,$3)',[order.hash,'confirmed@example.com',crypto.randomUUID()]);
+    const lease=crypto.randomUUID();
+    const [claimed]=await q(db,'select * from phase2_claim_notification_outbox($1,$2,clock_timestamp())',[10,lease]);
+    assert.equal(claimed.notification_type,'customer_payment_confirmed');
+    assert.equal(claimed.recipient_email,'confirmed@example.com');
+    assert.equal(claimed.payload.expected_payment_report_status,'confirmed');
+    assert.equal((await q(db,"select count(*)::int n from notification_outbox where order_id=$1 and status='superseded'",[order.id]))[0].n,3);
+    assert.equal((await q(db,"select count(*)::int n from notification_outbox where order_id=$1 and status='processing' and notification_type<>'customer_payment_confirmed'",[order.id]))[0].n,0);
   }finally{await db.close();}
 });
 
@@ -311,6 +335,9 @@ test('F006-5 admin reported cancellation, email revision, reminders, and browser
     const variants=[{variant_id:variant,quantity:1,processing_option_ids:[]}];
     const order=await c2Checkout(db,{variants,hash:accessHash('8')});
     const [report]=await q(db,'select (phase2_submit_payment_report($1,$2,$3,$4)).*',[order.hash,'12345',100,crypto.randomUUID()]);
+    await assert.rejects(q(db,'select admin_cancel_order($1)',[order.id]),/reported_order_cancellation_rpc_required/);
+    await assert.rejects(q(db,"select admin_cancel_reported_order($1,$2,'   ',$3)",[order.id,report.id,crypto.randomUUID()]),/reported_order_cancel_reason_required/);
+    assert.equal((await q(db,"select count(*)::int n from inventory_movements where order_id=$1 and movement_type='order_cancel_restore'",[order.id]))[0].n,0);
     await q(db,'select phase2_update_order_email($1,$2,$3)',[order.hash,'new@example.com',crypto.randomUUID()]);
     const outboxBefore=(await q(db,'select count(*)::int n from notification_outbox where order_id=$1',[order.id]))[0].n;
     await q(db,'select phase2_update_order_email($1,$2,$3)',[order.hash,'NEW@example.com',crypto.randomUUID()]);
@@ -335,12 +362,15 @@ test('F006-5 admin reported cancellation, email revision, reminders, and browser
     await q(db,"select admin_cancel_reported_order($1,$2,'customer contacted',$3)",[order.id,report.id,cancelKey]);
     await q(db,"select admin_cancel_reported_order($1,$2,'customer contacted',$3)",[order.id,report.id,cancelKey]);
     assert.equal((await q(db,"select count(*)::int n from inventory_movements where order_id=$1 and movement_type='order_cancel_restore'",[order.id]))[0].n,1);
+    await assert.rejects(q(db,'select phase2_submit_payment_report($1,$2,$3,$4)',[order.hash,'12345',100,crypto.randomUUID()]),/cancelled_order_payment_report_not_allowed/);
     const [privileges]=await q(db,`select
       has_function_privilege('anon','public.phase2_submit_payment_report(text,text,integer,uuid)','execute') anon_submit,
       has_function_privilege('authenticated','public.phase2_submit_payment_report(text,text,integer,uuid)','execute') auth_submit,
       has_function_privilege('anon','public.admin_confirm_reported_order_payment(uuid,uuid,uuid)','execute') anon_admin,
       has_function_privilege('authenticated','public.admin_confirm_reported_order_payment(uuid,uuid,uuid)','execute') auth_admin,
-      has_table_privilege('authenticated','public.order_customer_access_tokens','select') token_read`);
-    assert.deepEqual(privileges,{anon_submit:false,auth_submit:false,anon_admin:false,auth_admin:true,token_read:false});
+      has_table_privilege('authenticated','public.order_customer_access_tokens','select') token_read,
+      has_column_privilege('authenticated','public.orders','payment_slot_active','update') slot_write,
+      has_column_privilege('authenticated','public.orders','checkout_phone_normalized','update') phone_write`);
+    assert.deepEqual(privileges,{anon_submit:false,auth_submit:false,anon_admin:false,auth_admin:true,token_read:false,slot_write:false,phone_write:false});
   }finally{await db.close();}
 });

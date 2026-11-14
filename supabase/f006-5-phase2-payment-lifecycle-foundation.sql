@@ -93,14 +93,15 @@ create table public.notification_outbox (
   id uuid primary key default gen_random_uuid(),
   dedupe_key text not null unique,
   notification_type text not null check (notification_type in (
-    'customer_payment_report_received','customer_payment_report_email_changed',
+    'customer_payment_report_received','customer_payment_report_exception',
+    'customer_payment_confirmed',
     'admin_payment_review_pending_24h','admin_payment_review_exception_24h'
   )),
   order_id uuid not null references public.orders(id) on delete restrict,
   recipient_kind text not null check (recipient_kind in ('customer','admin')),
   recipient_email text check (recipient_email is null or length(recipient_email)<=254),
   payload jsonb not null default '{}'::jsonb,
-  status text not null default 'pending' check (status in ('pending','processing','sent','dead')),
+  status text not null default 'pending' check (status in ('pending','processing','sent','dead','superseded')),
   attempts integer not null default 0 check (attempts>=0),
   available_at timestamptz not null default clock_timestamp(),
   lease_token uuid,
@@ -223,7 +224,8 @@ begin
   insert into public.notification_outbox(dedupe_key,notification_type,order_id,recipient_kind,recipient_email,payload)
     values('order:'||v_order.id||':payment-report-submitted:v1:email-revision:'||v_order.customer_email_revision,
       'customer_payment_report_received',v_order.id,'customer',v_order.email,
-      jsonb_build_object('order_id',v_order.id,'amount',v_order.total_amount,'email_revision',v_order.customer_email_revision))
+      jsonb_build_object('order_id',v_order.id,'amount',v_order.total_amount,
+        'email_revision',v_order.customer_email_revision,'expected_payment_report_status','pending'))
     on conflict(dedupe_key) do nothing;
   return v_report;
 end; $$;
@@ -266,6 +268,7 @@ create or replace function public.phase2_update_order_email(
 returns public.orders language plpgsql security definer set search_path=public,pg_temp as $$
 declare v_order public.orders; v_revision public.order_customer_contact_revisions;
         v_hash text:=public.phase2_assert_access_hash(p_access_token_hash); v_email text:=lower(btrim(coalesce(p_email,'')));
+        v_notification_type text;
 begin
   if p_idempotency_key is null then raise exception 'email_change_idempotency_key_required'; end if;
   if v_email='' or length(v_email)>254 or v_email !~* '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$' then raise exception 'invalid_email'; end if;
@@ -286,11 +289,17 @@ begin
   insert into public.order_lifecycle_events(order_id,event_type,actor_type,old_value,new_value,idempotency_key)
     values(v_order.id,'customer_email_changed','customer',jsonb_build_object('email',v_revision.old_email),
       jsonb_build_object('email',v_email,'revision',v_revision.revision),p_idempotency_key);
-  if v_order.payment_report_status is not null then
+  v_notification_type:=case
+    when v_order.payment_report_status='pending' and v_order.payment_status='unpaid' then 'customer_payment_report_received'
+    when v_order.payment_report_status='exception' and v_order.payment_status='unpaid' then 'customer_payment_report_exception'
+    when v_order.payment_report_status='confirmed' and v_order.payment_status='paid' then 'customer_payment_confirmed'
+    else null end;
+  if v_notification_type is not null then
     insert into public.notification_outbox(dedupe_key,notification_type,order_id,recipient_kind,recipient_email,payload)
-      values('order:'||v_order.id||':email-revision:'||v_revision.revision||':payment-report-notice',
-        'customer_payment_report_email_changed',v_order.id,'customer',v_email,
-        jsonb_build_object('order_id',v_order.id,'amount',v_order.total_amount,'email_revision',v_revision.revision))
+      values('order:'||v_order.id||':email-revision:'||v_revision.revision||':'||v_notification_type,
+        v_notification_type,v_order.id,'customer',v_email,
+        jsonb_build_object('order_id',v_order.id,'amount',v_order.total_amount,
+          'email_revision',v_revision.revision,'expected_payment_report_status',v_order.payment_report_status))
       on conflict(dedupe_key) do nothing;
   end if;
   return v_order;
@@ -573,6 +582,24 @@ returns setof public.notification_outbox language plpgsql security definer set s
 begin
   if p_limit is null or p_limit<1 or p_limit>100 then raise exception 'invalid_outbox_claim_limit'; end if;
   if p_lease_token is null or p_as_of is null then raise exception 'outbox_lease_required'; end if;
+  -- Tasks are state-specific, not pre-rendered email. Supersede a stale task before
+  -- handing it to a provider worker; a worker must use only rows returned by this
+  -- claim and must honor lease conflicts before attempting a retry.
+  update public.notification_outbox n set status='superseded',lease_token=null,leased_at=null,
+    last_error_code='order_state_changed',updated_at=p_as_of
+  from public.orders o
+  where o.id=n.order_id and n.status in ('pending','processing') and (
+    (n.notification_type='customer_payment_report_received'
+      and not (o.status<>'cancelled' and o.payment_status='unpaid' and o.payment_report_status='pending'))
+    or (n.notification_type='customer_payment_report_exception'
+      and not (o.status<>'cancelled' and o.payment_status='unpaid' and o.payment_report_status='exception'))
+    or (n.notification_type='customer_payment_confirmed'
+      and not (o.status<>'cancelled' and o.payment_status='paid' and o.payment_report_status='confirmed'))
+    or (n.notification_type='admin_payment_review_pending_24h'
+      and not (o.status<>'cancelled' and o.payment_status='unpaid' and o.payment_report_status='pending'))
+    or (n.notification_type='admin_payment_review_exception_24h'
+      and not (o.status<>'cancelled' and o.payment_status='unpaid' and o.payment_report_status='exception'))
+  );
   return query
   with candidates as (
     select id from public.notification_outbox
@@ -663,6 +690,10 @@ revoke all on public.order_customer_access_tokens,public.order_payment_reports,
   public.notification_outbox,public.phase2_order_action_tokens from public,anon,authenticated;
 grant select on public.order_payment_reports,public.order_customer_contact_revisions,
   public.order_lifecycle_events,public.notification_outbox to authenticated;
+revoke update (payment_reporting_required,payment_slot_active,payment_report_status,
+  payment_reported_at,current_payment_report_id,payment_review_updated_at,
+  checkout_phone_normalized,customer_email_revision,customer_email_changed_at)
+on public.orders from public,anon,authenticated;
 
 revoke all on function public.phase2_normalize_tw_mobile(text),public.phase2_assert_access_hash(text),
   public.phase2_create_checkout_order_with_access(text,text,text,text,jsonb,jsonb,text,uuid,text),

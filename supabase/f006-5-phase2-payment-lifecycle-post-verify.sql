@@ -20,6 +20,14 @@ with checks(check_name,result,detail) as (
     and indexdef ilike '%unique%' and indexdef ilike '%payment_slot_active%')
     then 'PASS' else 'BLOCKER' end,'database constraint is the final same-phone concurrency defense'
   union all
+  select 'outbox_lifecycle_model',case when
+    exists(select 1 from pg_constraint c where c.conrelid='public.notification_outbox'::regclass
+      and pg_get_constraintdef(c.oid) like '%customer_payment_report_exception%'
+      and pg_get_constraintdef(c.oid) like '%customer_payment_confirmed%')
+    and exists(select 1 from pg_constraint c where c.conrelid='public.notification_outbox'::regclass
+      and pg_get_constraintdef(c.oid) like '%superseded%')
+    then 'PASS' else 'BLOCKER' end,'customer notices are state-specific and stale work can be superseded'
+  union all
   select 'functions',case when
     to_regprocedure('public.phase2_create_checkout_order_with_access(text,text,text,text,jsonb,jsonb,text,uuid,text)') is not null
     and to_regprocedure('public.phase2_submit_payment_report(text,text,integer,uuid)') is not null
@@ -55,6 +63,11 @@ with checks(check_name,result,detail) as (
     and not coalesce(has_table_privilege('anon','public.notification_outbox','UPDATE'),false)
     and not coalesce(has_table_privilege('authenticated','public.notification_outbox','UPDATE'),false)
     and not coalesce(has_table_privilege('authenticated','public.order_customer_access_tokens','SELECT'),false)
+    and not coalesce(has_table_privilege('anon','public.orders','UPDATE'),false)
+    and not coalesce(has_table_privilege('authenticated','public.orders','UPDATE'),false)
+    and not coalesce(has_column_privilege('anon','public.orders','payment_slot_active','UPDATE'),false)
+    and not coalesce(has_column_privilege('authenticated','public.orders','payment_slot_active','UPDATE'),false)
+    and not coalesce(has_column_privilege('authenticated','public.orders','checkout_phone_normalized','UPDATE'),false)
     then 'PASS' else 'BLOCKER' end,'reports, token hashes, audit, and outbox are not browser-writable'
   union all
   select 'rls_enabled',case when not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace

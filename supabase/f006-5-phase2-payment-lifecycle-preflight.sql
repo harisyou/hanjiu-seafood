@@ -31,6 +31,11 @@ with checks(check_name,result,detail) as (
     and not coalesce(has_function_privilege('authenticated','public.phase2_release_expired_checkout_hold(uuid,timestamp with time zone)','execute'),false)
     then 'PASS' else 'BLOCKER' end,'internal checkout and release RPCs must remain browser-closed'
   union all
+  select 'orders_browser_write_scope',case when
+    not coalesce(has_table_privilege('anon','public.orders','UPDATE'),false)
+    and not coalesce(has_table_privilege('authenticated','public.orders','UPDATE'),false)
+    then 'PASS' else 'BLOCKER' end,'browser roles must not have table-wide UPDATE that would cover future lifecycle columns'
+  union all
   select 'checkout_idempotency',case when
     exists(select 1 from pg_indexes where schemaname='public' and tablename='orders'
       and indexname='orders_checkout_idempotency_key_unique_idx' and indexdef ilike '%unique%')
