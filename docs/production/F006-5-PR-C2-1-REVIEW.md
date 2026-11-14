@@ -22,9 +22,11 @@ Codex does not execute Production SQL.
   bounded batches, `SKIP LOCKED`, scoped leases, retry timestamps, attempt counts,
   and terminal failure records for a later PR-C2.2 worker. Customer notification
   jobs carry an expected payment lifecycle state. Claiming work supersedes stale
-  pending/leased jobs after a transition, so pending-review copy cannot be reused
-  for an exception, confirmed payment, or cancelled order. The future worker must
-  render from the claimed notification type and honor lease conflicts before send.
+  pending/leased jobs, and an order lifecycle trigger proactively supersedes them
+  when payment/report/cancellation state changes. Pending-review copy therefore
+  cannot remain valid for an exception, confirmed payment, payment reversal, or
+  cancelled order. The future worker must render from the claimed notification
+  type and re-check its lease/status immediately before provider send.
 - `phase2_order_action_tokens` scopes exceptional after-deadline payment and
   reported-order cancellation authorization to one backend, transaction, order,
   action, and current report.

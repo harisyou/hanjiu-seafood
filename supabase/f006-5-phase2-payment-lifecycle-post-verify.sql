@@ -39,6 +39,8 @@ with checks(check_name,result,detail) as (
     and to_regprocedure('public.phase2_claim_notification_outbox(integer,uuid,timestamp with time zone)') is not null
     and to_regprocedure('public.phase2_complete_notification_outbox(uuid,uuid,text,timestamp with time zone)') is not null
     and to_regprocedure('public.phase2_fail_notification_outbox(uuid,uuid,text,timestamp with time zone,boolean)') is not null
+    and to_regprocedure('public.phase2_supersede_obsolete_notifications(uuid,timestamp with time zone)') is not null
+    and to_regprocedure('public.phase2_refresh_notification_lifecycle()') is not null
     then 'PASS' else 'BLOCKER' end,'customer lifecycle and admin review RPCs exist'
   union all
   select 'browser_internal_rpc_closed',case when

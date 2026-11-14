@@ -644,6 +644,44 @@ begin
   return v_row;
 end; $$;
 
+create or replace function public.phase2_supersede_obsolete_notifications(
+  p_order_id uuid,p_as_of timestamptz default clock_timestamp())
+returns integer language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_count integer;
+begin
+  if p_order_id is null or p_as_of is null then raise exception 'notification_order_state_required'; end if;
+  update public.notification_outbox n set status='superseded',lease_token=null,leased_at=null,
+    last_error_code='order_state_changed',updated_at=p_as_of
+  from public.orders o
+  where o.id=p_order_id and n.order_id=o.id and n.status in ('pending','processing') and (
+    (n.notification_type='customer_payment_report_received'
+      and not (o.status<>'cancelled' and o.payment_status='unpaid' and o.payment_report_status='pending'))
+    or (n.notification_type='customer_payment_report_exception'
+      and not (o.status<>'cancelled' and o.payment_status='unpaid' and o.payment_report_status='exception'))
+    or (n.notification_type='customer_payment_confirmed'
+      and not (o.status<>'cancelled' and o.payment_status='paid' and o.payment_report_status='confirmed'))
+    or (n.notification_type='admin_payment_review_pending_24h'
+      and not (o.status<>'cancelled' and o.payment_status='unpaid' and o.payment_report_status='pending'))
+    or (n.notification_type='admin_payment_review_exception_24h'
+      and not (o.status<>'cancelled' and o.payment_status='unpaid' and o.payment_report_status='exception'))
+  );
+  get diagnostics v_count=row_count;
+  return v_count;
+end; $$;
+
+create or replace function public.phase2_refresh_notification_lifecycle()
+returns trigger language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+  if new.status is distinct from old.status or new.payment_status is distinct from old.payment_status
+     or new.payment_report_status is distinct from old.payment_report_status then
+    perform public.phase2_supersede_obsolete_notifications(new.id,clock_timestamp());
+  end if;
+  return new;
+end; $$;
+create trigger orders_notification_lifecycle_refresh
+after update of status,payment_status,payment_report_status on public.orders
+for each row execute function public.phase2_refresh_notification_lifecycle();
+
 create or replace function public.phase2_guard_new_checkout_financials()
 returns trigger language plpgsql set search_path=public,pg_temp as $$
 begin
@@ -704,6 +742,8 @@ revoke all on function public.phase2_normalize_tw_mobile(text),public.phase2_ass
   public.phase2_claim_notification_outbox(integer,uuid,timestamptz),
   public.phase2_complete_notification_outbox(uuid,uuid,text,timestamptz),
   public.phase2_fail_notification_outbox(uuid,uuid,text,timestamptz,boolean),
+  public.phase2_supersede_obsolete_notifications(uuid,timestamptz),
+  public.phase2_refresh_notification_lifecycle(),
   public.phase2_guard_new_checkout_financials(),public.phase2_guard_new_checkout_items(),
   public.phase2_guard_reported_order_cancellation()
 from public,anon,authenticated;

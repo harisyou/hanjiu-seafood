@@ -303,12 +303,12 @@ test('F006-5 email resend tasks are lifecycle-specific and stale tasks are super
     assert.equal((await q(db,"select count(*)::int n from notification_outbox where order_id=$1 and notification_type='customer_payment_report_exception' and payload->>'expected_payment_report_status'='exception'",[order.id]))[0].n,1);
     await q(db,'select admin_confirm_reported_order_payment($1,$2,$3)',[order.id,report.id,crypto.randomUUID()]);
     await q(db,'select phase2_update_order_email($1,$2,$3)',[order.hash,'confirmed@example.com',crypto.randomUUID()]);
+    assert.equal((await q(db,"select count(*)::int n from notification_outbox where order_id=$1 and status='superseded'",[order.id]))[0].n,3);
     const lease=crypto.randomUUID();
     const [claimed]=await q(db,'select * from phase2_claim_notification_outbox($1,$2,clock_timestamp())',[10,lease]);
     assert.equal(claimed.notification_type,'customer_payment_confirmed');
     assert.equal(claimed.recipient_email,'confirmed@example.com');
     assert.equal(claimed.payload.expected_payment_report_status,'confirmed');
-    assert.equal((await q(db,"select count(*)::int n from notification_outbox where order_id=$1 and status='superseded'",[order.id]))[0].n,3);
     assert.equal((await q(db,"select count(*)::int n from notification_outbox where order_id=$1 and status='processing' and notification_type<>'customer_payment_confirmed'",[order.id]))[0].n,0);
   }finally{await db.close();}
 });
