@@ -14,7 +14,9 @@ async function setup(){
   const db=new pg.Client({connectionString:url}); await db.connect();
   await db.query(`
     do $$begin if not exists(select 1 from pg_roles where rolname='anon') then create role anon;end if;
-      if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated;end if;end$$;
+      if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated;end if;
+      if not exists(select 1 from pg_roles where rolname='authenticator') then create role authenticator;end if;
+      if not exists(select 1 from pg_roles where rolname='service_role') then create role service_role bypassrls;end if;end$$;
     create schema auth; create schema storage;
     create function auth.uid() returns uuid language sql stable as $$select '80000000-0000-4000-8000-000000000001'::uuid$$;
     create function public.is_hanjiu_admin() returns boolean language sql stable as $$select true$$;
@@ -34,6 +36,8 @@ async function setup(){
     create table product_processing_options(product_id uuid,processing_option_id text,active boolean,sort_order integer);
     create table product_processing_presets(product_id uuid,preset_id text,active boolean);
     create table storage.buckets(id text primary key); create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text,unique(bucket_id,name));
+    alter table storage.objects enable row level security;
+    create policy "admin upload product images" on storage.objects for insert to authenticated with check(bucket_id='product-images' and public.is_hanjiu_admin());
     insert into storage.buckets values('product-images');
     insert into products(id,name,status) values('${product}','規格魚','available');
     insert into product_variants values('${variant}','${product}','規格',100,true,20,false);
@@ -55,7 +59,16 @@ async function setup(){
       cid:=find_or_create_customer(p_customer_name,p_phone,p_email,null);insert into orders(customer_id,customer_name,phone,email,fulfillment,processing,note,checkout_idempotency_key,checkout_request_fingerprint) values(cid,p_customer_name,p_phone,p_email,p_fulfillment,'依品項',p_note,p_idempotency_key,md5(p_items::text)) returning id into oid;
       perform set_config('app.inventory_movement_type','checkout_sale',true);perform set_config('app.inventory_movement_order_id',oid::text,true);
       for it in select value from jsonb_array_elements(p_items) loop select pv.*,p.name product_name into v from product_variants pv join products p on p.id=pv.product_id where pv.id=(it->>'variant_id')::uuid for update of pv;if v.inventory<(it->>'quantity')::integer then raise exception 'variant_unavailable';end if;update product_variants set inventory=inventory-(it->>'quantity')::integer where id=v.id;insert into order_items(order_id,product_id,product_name,variant_id,variant_name,price,quantity,supply_type) values(oid,v.product_id,v.product_name,v.id,v.name,v.price,(it->>'quantity')::integer,'in_stock');end loop;return oid;end$$;`);
-  for(const file of ['f003-14-order-totals.sql','f003-17-paid-financial-integrity.sql','f003-18-repayment-lifecycle.sql','f006-1-phase2-pr-a-database-foundation.sql','f006-2-phase2-pr-b-weighted-quick-entry.sql','f006-3-phase2-weighted-stock-availability-actions.sql','f006-4-phase2-weighted-checkout-foundation.sql','f006-5-phase2-payment-lifecycle-foundation.sql']) await db.query(migration(file));
+  for(const file of ['f003-14-order-totals.sql','f003-17-paid-financial-integrity.sql','f003-18-repayment-lifecycle.sql','f006-1-phase2-pr-a-database-foundation.sql','f006-2-phase2-pr-b-weighted-quick-entry.sql','f006-3-phase2-weighted-stock-availability-actions.sql','f006-4-phase2-weighted-checkout-foundation.sql','f006-4a-production-maintenance-foundation.sql']) await db.query(migration(file));
+  const preflight=await db.query(migration('f006-5-phase2-payment-lifecycle-preflight.sql'));
+  const preRows=(Array.isArray(preflight)?preflight:[preflight]).flatMap(result=>result.rows??[]);
+  assert.equal(preRows.some(row=>row.check_name==='SUMMARY'&&row.result==='BLOCKER'),false,'F006-5 preflight blocker after F006-4a');
+  await db.query(migration('f006-5-phase2-payment-lifecycle-foundation.sql'));
+  await db.query('select maintenance_private.reconcile_protected_relations()');
+  assert.equal((await db.query('select count(*) n from maintenance_private.protection_gaps()')).rows[0].n,'0');
+  const post=await db.query(migration('f006-5-phase2-payment-lifecycle-post-verify.sql'));
+  const postRows=(Array.isArray(post)?post:[post]).flatMap(result=>result.rows??[]);
+  assert.equal(postRows.some(row=>row.check_name==='SUMMARY'&&row.result==='BLOCKER'),false,'F006-5 post-verify blocker after F006-4a');
   await db.end();
 }
 
