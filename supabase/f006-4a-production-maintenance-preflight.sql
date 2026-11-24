@@ -65,6 +65,23 @@ from pg_db_role_setting s join pg_roles r on r.oid=s.setrole,
   lateral unnest(coalesce(s.setconfig,'{}'::text[])) x
 where r.rolname='authenticator' and x like 'pgrst.db_pre_request=%';
 
+-- Save the original hook execution model and role privileges before chaining it.
+with hook as (
+  select to_regprocedure(split_part(x,'=',2)||'()') oid
+  from pg_db_role_setting s join pg_roles r on r.oid=s.setrole,
+    lateral unnest(coalesce(s.setconfig,'{}'::text[])) x
+  where r.rolname='authenticator'
+    and s.setdatabase in (0,(select oid from pg_database where datname=current_database()))
+    and x like 'pgrst.db_pre_request=%'
+  order by (s.setdatabase<>0) desc limit 1
+)
+select p.oid::regprocedure hook,p.prosecdef security_definer,p.provolatile volatility,
+  has_function_privilege('anon',p.oid,'EXECUTE') anon_execute,
+  has_function_privilege('authenticated',p.oid,'EXECUTE') authenticated_execute,
+  has_function_privilege('service_role',p.oid,'EXECUTE') service_role_execute,
+  md5(pg_get_functiondef(p.oid)) definition_md5
+from hook h join pg_proc p on p.oid=h.oid;
+
 -- Save Storage policy fingerprints.
 select policyname,cmd,roles,md5(coalesce(qual,'')||'|'||coalesce(with_check,'')) definition_md5,
   qual,with_check

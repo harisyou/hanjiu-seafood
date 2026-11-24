@@ -4,7 +4,8 @@ import {readFileSync} from 'node:fs';
 import pg from 'pg';
 
 const url=process.env.F0065_DATABASE_URL;
-const enabled=Boolean(url);
+const enabled=Boolean(url)&&process.env.F0065_CONFIRM_DISPOSABLE_POSTGRES==='I_CONFIRM_DISPOSABLE_POSTGRES'
+  &&Boolean(process.env.F0065_TEST_ENVIRONMENT_ID)&&Boolean(process.env.F0065_TEST_DATABASE_SYSTEM_IDENTIFIER);
 const migration=name=>readFileSync(new URL(`../../supabase/${name}`,import.meta.url),'utf8');
 const product='10000000-0000-4000-8000-000000000002';
 const variant='20000000-0000-4000-8000-000000000001';
@@ -12,6 +13,10 @@ const hash=value=>value.repeat(64);
 
 async function setup(){
   const db=new pg.Client({connectionString:url}); await db.connect();
+  const identity=(await db.query(`select (pg_control_system()).system_identifier::text system_identifier,
+    shobj_description(oid,'pg_database') marker from pg_database where datname=current_database()`)).rows[0];
+  assert.equal(identity.system_identifier,process.env.F0065_TEST_DATABASE_SYSTEM_IDENTIFIER,'database cluster identity mismatch');
+  assert.equal(identity.marker,`hanjiu-disposable-maintenance-test:${process.env.F0065_TEST_ENVIRONMENT_ID}`,'database marker mismatch');
   await db.query(`
     do $$begin if not exists(select 1 from pg_roles where rolname='anon') then create role anon;end if;
       if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated;end if;

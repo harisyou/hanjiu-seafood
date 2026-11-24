@@ -7,9 +7,11 @@ with checks(check_name,result,detail) as (
     and to_regprocedure('maintenance_private.enforce_api_request()') is not null
     and to_regprocedure('maintenance_private.enable(uuid,bigint,text,integer,text,boolean,boolean,boolean)') is not null
     and to_regprocedure('maintenance_private.disable(uuid,bigint,text)') is not null
-    then 'PASS' else 'BLOCKER' end,'state, audit, gate, enable and disable exist'
+    and to_regprocedure('maintenance_private.confirm_postgrest_runtime_gate(uuid,bigint,text)') is not null
+    then 'PASS' else 'BLOCKER' end,'state, audit, gate, runtime confirmation, enable and disable exist'
   union all
   select 'default_inactive',case when (select count(*)=1 and not bool_or(active) and max(version)=0
+    and not bool_or(postgrest_runtime_confirmed) and max(postgrest_runtime_confirmed_at) is null
     from maintenance_private.maintenance_state) then 'PASS' else 'BLOCKER' end,
     'installation must never enable maintenance automatically'
   union all
@@ -18,6 +20,23 @@ with checks(check_name,result,detail) as (
   union all
   select 'postgrest_hook',case when maintenance_private.configured_pre_request()='maintenance_private.enforce_api_request'
     then 'PASS' else 'BLOCKER' end,'authenticator is configured for the permanent composite gate'
+  union all
+  select 'postgrest_invoker_model',case when
+    exists(select 1 from pg_proc where oid='maintenance_private.enforce_api_request()'::regprocedure and not prosecdef)
+    and exists(select 1 from pg_proc where oid='maintenance_private.previous_pre_request_name()'::regprocedure and prosecdef)
+    then 'PASS' else 'BLOCKER' end,'composite hook preserves caller identity; only configuration lookup is definer'
+  union all
+  select 'postgrest_helper_privileges',case when
+    has_schema_privilege('anon','maintenance_private','USAGE')
+    and has_schema_privilege('authenticated','maintenance_private','USAGE')
+    and has_schema_privilege('service_role','maintenance_private','USAGE')
+    and has_function_privilege('anon','maintenance_private.enforce_api_request()','EXECUTE')
+    and has_function_privilege('authenticated','maintenance_private.enforce_api_request()','EXECUTE')
+    and has_function_privilege('service_role','maintenance_private.enforce_api_request()','EXECUTE')
+    and has_function_privilege('anon','maintenance_private.previous_pre_request_name()','EXECUTE')
+    and has_function_privilege('authenticated','maintenance_private.previous_pre_request_name()','EXECUTE')
+    and has_function_privilege('service_role','maintenance_private.previous_pre_request_name()','EXECUTE')
+    then 'PASS' else 'BLOCKER' end,'Data API roles have only the schema/helper access required by the invoker hook'
   union all
   select 'protection_coverage',case when not exists(select 1 from maintenance_private.protection_gaps())
     then 'PASS' else 'BLOCKER' end,'every current public table has enabled write and truncate guards'
@@ -35,6 +54,8 @@ with checks(check_name,result,detail) as (
     not coalesce(has_function_privilege('anon','maintenance_private.enable(uuid,bigint,text,integer,text,boolean,boolean,boolean)','execute'),false)
     and not coalesce(has_function_privilege('authenticated','maintenance_private.enable(uuid,bigint,text,integer,text,boolean,boolean,boolean)','execute'),false)
     and not coalesce(has_function_privilege('service_role','maintenance_private.enable(uuid,bigint,text,integer,text,boolean,boolean,boolean)','execute'),false)
+    and not coalesce(has_function_privilege('authenticated','maintenance_private.confirm_postgrest_runtime_gate(uuid,bigint,text)','execute'),false)
+    and not coalesce(has_function_privilege('service_role','maintenance_private.confirm_postgrest_runtime_gate(uuid,bigint,text)','execute'),false)
     and not coalesce(has_table_privilege('service_role','maintenance_private.maintenance_state','UPDATE'),false)
     then 'PASS' else 'BLOCKER' end,'browser and service roles cannot toggle state or use owner controls'
 )

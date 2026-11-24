@@ -34,6 +34,14 @@ begin
   if to_regclass('storage.objects') is not null then
     lock table storage.objects in access exclusive mode;
   else raise exception 'storage_objects_required'; end if;
+  -- Once all application relations are locked, reject any pre-existing snapshot
+  -- instead of assuming equal counts imply a drained system. New writers that
+  -- reach a locked relation wait and then see the installed trigger at commit.
+  if exists(select 1 from pg_stat_activity a where a.datname=current_database()
+    and a.pid<>pg_backend_pid() and (a.xact_start is not null or a.backend_xmin is not null
+      or a.state like 'idle in transaction%'))
+    or exists(select 1 from pg_prepared_xacts p where p.database=current_database())
+    then raise exception 'bootstrap_transaction_drain_incomplete'; end if;
 end $$;
 
 create schema maintenance_private;
@@ -52,21 +60,26 @@ create table maintenance_private.maintenance_state(
   application_maintenance_confirmed boolean not null default false,
   external_writers_confirmed_stopped boolean not null default false,
   storage_privileged_writers_confirmed_stopped boolean not null default false,
+  postgrest_runtime_confirmed boolean not null default false,
+  postgrest_runtime_confirmed_at timestamptz,
   updated_at timestamptz not null default clock_timestamp(),
   check ((active and enabled_operation_id is not null and enabled_at is not null and enabled_by is not null
     and reason is not null and btrim(reason)<>'' and application_revision is not null
     and application_maintenance_confirmed and external_writers_confirmed_stopped
-    and storage_privileged_writers_confirmed_stopped)
+    and storage_privileged_writers_confirmed_stopped
+    and ((postgrest_runtime_confirmed and postgrest_runtime_confirmed_at is not null)
+      or (not postgrest_runtime_confirmed and postgrest_runtime_confirmed_at is null)))
     or (not active and enabled_operation_id is null and enabled_at is null and enabled_by is null
       and reason is null and application_revision is null and not application_maintenance_confirmed
-      and not external_writers_confirmed_stopped and not storage_privileged_writers_confirmed_stopped))
+      and not external_writers_confirmed_stopped and not storage_privileged_writers_confirmed_stopped
+      and not postgrest_runtime_confirmed and postgrest_runtime_confirmed_at is null))
 );
 insert into maintenance_private.maintenance_state(singleton) values(true);
 
 create table maintenance_private.maintenance_events(
   id uuid primary key default gen_random_uuid(),
   operation_id uuid not null unique,
-  action text not null check(action in ('enabled','disabled','recovered_fail_closed')),
+  action text not null check(action in ('enabled','postgrest_runtime_confirmed','disabled','recovered_fail_closed')),
   old_version bigint,
   new_version bigint not null,
   actor_session_user text not null,
@@ -288,12 +301,37 @@ begin
     enabled_operation_id=p_operation_id,enabled_at=clock_timestamp(),enabled_by=session_user,
     reason=v_reason,retry_after_seconds=p_retry_after_seconds,application_revision=btrim(p_application_revision),
     application_maintenance_confirmed=true,external_writers_confirmed_stopped=true,
-    storage_privileged_writers_confirmed_stopped=true,updated_at=clock_timestamp()
+    storage_privileged_writers_confirmed_stopped=true,postgrest_runtime_confirmed=false,
+    postgrest_runtime_confirmed_at=null,updated_at=clock_timestamp()
     where singleton returning * into v_state;
   insert into maintenance_private.maintenance_events(operation_id,action,old_version,new_version,
     actor_session_user,actor_current_user,reason,details)
   values(p_operation_id,'enabled',p_expected_version,v_state.version,session_user,current_user,v_reason,
     jsonb_build_object('retry_after_seconds',p_retry_after_seconds,'application_revision',btrim(p_application_revision)));
+  return v_state;
+end $$;
+
+create or replace function maintenance_private.confirm_postgrest_runtime_gate(
+  p_operation_id uuid,p_expected_version bigint,p_reason text)
+returns maintenance_private.maintenance_state language plpgsql security definer set search_path=maintenance_private,pg_catalog as $$
+declare v_state maintenance_private.maintenance_state; v_reason text:=nullif(btrim(coalesce(p_reason,'')),'');
+begin
+  perform maintenance_private.require_owner_bypass();
+  if p_operation_id is null or v_reason is null then raise exception 'postgrest_confirmation_details_required'; end if;
+  perform pg_advisory_xact_lock(hashtextextended('hanjiu-production-maintenance',0));
+  select * into v_state from maintenance_private.maintenance_state where singleton for update;
+  if exists(select 1 from maintenance_private.maintenance_events where operation_id=p_operation_id and action='postgrest_runtime_confirmed') then return v_state; end if;
+  if not v_state.active then raise exception 'maintenance_not_active'; end if;
+  if v_state.version is distinct from p_expected_version then raise exception 'maintenance_version_conflict'; end if;
+  if v_state.postgrest_runtime_confirmed then raise exception 'postgrest_runtime_already_confirmed'; end if;
+  if maintenance_private.configured_pre_request() is distinct from 'maintenance_private.enforce_api_request'
+    then raise exception 'maintenance_postgrest_hook_not_configured'; end if;
+  update maintenance_private.maintenance_state set version=version+1,
+    postgrest_runtime_confirmed=true,postgrest_runtime_confirmed_at=clock_timestamp(),updated_at=clock_timestamp()
+    where singleton returning * into v_state;
+  insert into maintenance_private.maintenance_events(operation_id,action,old_version,new_version,
+    actor_session_user,actor_current_user,reason)
+  values(p_operation_id,'postgrest_runtime_confirmed',p_expected_version,v_state.version,session_user,current_user,v_reason);
   return v_state;
 end $$;
 
@@ -337,7 +375,8 @@ begin
   update maintenance_private.maintenance_state set active=false,version=version+1,
     enabled_operation_id=null,enabled_at=null,enabled_by=null,reason=null,application_revision=null,
     application_maintenance_confirmed=false,external_writers_confirmed_stopped=false,
-    storage_privileged_writers_confirmed_stopped=false,updated_at=clock_timestamp()
+    storage_privileged_writers_confirmed_stopped=false,postgrest_runtime_confirmed=false,
+    postgrest_runtime_confirmed_at=null,updated_at=clock_timestamp()
     where singleton returning * into v_state;
   insert into maintenance_private.maintenance_events(operation_id,action,old_version,new_version,
     actor_session_user,actor_current_user,reason)

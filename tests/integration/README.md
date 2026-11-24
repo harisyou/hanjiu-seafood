@@ -45,3 +45,39 @@ instead of silently skipping or running against a missing order.
 F006-4 uses independent `pg` clients for each contender, so every race executes
 through real PostgreSQL server sessions. It does not require a globally installed
 `psql` executable.
+# Disposable Supabase maintenance-stack identity
+
+`f006-4a-supabase-stack.test.mjs` is skipped unless every required value is
+provided and `MAINTENANCE_CONFIRM_DISPOSABLE_SUPABASE` exactly equals
+`I_CONFIRM_DISPOSABLE_SUPABASE_STACK`. It must never target Production.
+
+Before running it, create the following marker only in the disposable database,
+using values independently recorded for that stack. Remove the schema when the
+test project is retired:
+
+```sql
+create schema maintenance_test_identity;
+revoke all on schema maintenance_test_identity from public;
+create table maintenance_test_identity.environment (
+  singleton boolean primary key default true check (singleton),
+  environment_id text not null,
+  project_ref text not null,
+  api_origin text not null,
+  database_name text not null,
+  database_system_identifier text not null,
+  purpose text not null check (purpose = 'disposable_maintenance_integration'),
+  allow_destructive boolean not null check (allow_destructive),
+  expires_at timestamptz not null
+);
+```
+
+Supply `MAINTENANCE_TEST_ENVIRONMENT_ID`, `MAINTENANCE_TEST_PROJECT_REF`,
+`MAINTENANCE_TEST_DATABASE_SYSTEM_IDENTIFIER`, the isolated API URL/keys and the
+isolated owner database URL. The harness compares the marker to live catalog
+identity before any write and binds PostgREST to the same database with a random
+nonce. It does not print secrets.
+
+The direct PostgreSQL F006-4a and F006-5 harnesses likewise require an exact
+confirmation phrase, the live `pg_control_system().system_identifier`, and a
+database comment matching `hanjiu-disposable-maintenance-test:<environment-id>`.
+They no longer trust a database name containing `test`.

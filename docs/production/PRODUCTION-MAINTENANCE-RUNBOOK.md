@@ -95,6 +95,12 @@ the lock or prerequisite and start again. Do not manually apply fragments.
    version, reason, deployed revision and truthful attestations; run as owner.
 5. call a normal read-only REST endpoint and GET RPC: both must fail with the
    maintenance error. Probe a write RPC and Storage upload: both must fail.
+   Test GET, POST, PATCH and DELETE and save responses containing the exact
+   `maintenance_mode_active` reason; an arbitrary 4xx is not evidence. Only
+   after these real HTTP probes may the owner run
+   `maintenance-confirm-postgrest.sql`. Until then `maintenance-verify.sql`
+   reports `postgrest_runtime_probe` as BLOCKER even when catalog settings look
+   correct.
 6. run `maintenance-drain-verify.sql`. Maintenance Ready requires no blocker,
    no prepared transaction, no old snapshot/lock, and no unconfirmed external
    writer. Two equal counts or digests alone do not establish a drain.
@@ -139,6 +145,27 @@ identity is unverified, external writers are unknown, or App and DB disagree.
 Privileged direct object-store/S3 activity is outside PostgreSQL enforcement and
 must be stopped operationally. In-flight uploads must finish or be abandoned
 before readiness is attested.
+
+## Disposable Supabase integration identity
+
+The Supabase HTTP/Storage harness is destructive and refuses to run based on a
+URL or database-name convention alone. Before use, an isolated stack owner must
+create a short-lived `maintenance_test_identity.environment` marker containing a
+random environment ID, explicit project ref and API origin, actual database name,
+`pg_control_system().system_identifier`, purpose
+`disposable_maintenance_integration`, `allow_destructive=true`, and an expiry.
+The same values must be supplied through the documented test environment
+variables plus the exact confirmation phrase. The harness performs this
+read-only database comparison before its first write, then creates an HTTP probe
+row and reads the nonce through PostgREST to bind the API origin to that database.
+Missing, expired or mismatched identity refuses execution. Never install this
+marker in Production.
+
+The harness never logs keys or connection URLs. Its `finally` path opens a new
+owner connection, disables maintenance if necessary, verifies state is inactive,
+drops its probe table, reconciles coverage, and removes test objects. If cleanup
+cannot prove inactive state, it fails and leaves the gate fail-closed for manual
+recovery rather than claiming success.
 
 ## F006-5 order
 

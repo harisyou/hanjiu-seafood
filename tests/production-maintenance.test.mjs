@@ -44,7 +44,18 @@ test('migration is forward-only, inactive, guards DML/TRUNCATE and never snapsho
   assert.match(sql,/pg_advisory_xact_lock_shared/);
   assert.match(sql,/enforce_api_request\(\)[\s\S]*security invoker/);
   assert.match(sql,/session_user=maintenance_private\.database_owner_name/);
+  assert.match(sql,/bootstrap_transaction_drain_incomplete/);
+  assert.match(sql,/confirm_postgrest_runtime_gate/);
   assert.doesNotMatch(sql,/acl.*snapshot|default_transaction_read_only/i);
   assert.match(sql,/f006_5_must_not_precede_maintenance_foundation/);
+});
+
+test('Supabase harness requires a database-side disposable identity and exact maintenance errors',()=>{
+  const harness=source('tests/integration/f006-4a-supabase-stack.test.mjs');
+  assert.match(harness,/maintenance_test_identity\.environment/);
+  assert.match(harness,/database_system_identifier/);
+  assert.match(harness,/I_CONFIRM_DISPOSABLE_SUPABASE_STACK/);
+  assert.match(harness,/maintenance_mode_active/);
+  assert.doesNotMatch(harness,/database.*match\(|assert\.match\(db/i);
 });
 

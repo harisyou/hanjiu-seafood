@@ -5,6 +5,9 @@ with checks(check_name,result,detail) as (
     then 'PASS' else 'BLOCKER' end,'exactly one state row exists'
   union all select 'postgrest_hook',case when maintenance_private.configured_pre_request()='maintenance_private.enforce_api_request'
     then 'PASS' else 'BLOCKER' end,'configured hook matches reviewed gate'
+  union all select 'postgrest_runtime_probe',case when (select postgrest_runtime_confirmed
+    from maintenance_private.maintenance_state where singleton) then 'PASS' else 'BLOCKER' end,
+    'owner confirmed real GET/POST/PATCH/DELETE and RPC HTTP maintenance rejections after reload'
   union all select 'coverage',case when not exists(select 1 from maintenance_private.protection_gaps())
     then 'PASS' else 'BLOCKER' end,'all current application tables are guarded'
   union all select 'storage_guard',case when exists(select 1 from pg_trigger where tgrelid='storage.objects'::regclass
