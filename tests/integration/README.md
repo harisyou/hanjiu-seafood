@@ -81,3 +81,44 @@ The direct PostgreSQL F006-4a and F006-5 harnesses likewise require an exact
 confirmation phrase, the live `pg_control_system().system_identifier`, and a
 database comment matching `hanjiu-disposable-maintenance-test:<environment-id>`.
 They no longer trust a database name containing `test`.
+
+## Owner-run Cloud initialization
+
+Use the reviewed PR commit and an independently verified disposable identity
+marker. Keep test credentials outside the checkout. In a fresh CMD session with
+the test variables loaded, run:
+
+```bat
+node scripts\init-maintenance-disposable.mjs > "%TEMP%\maintenance-dry-run.json"
+set "MAINTENANCE_INITIALIZE_CONFIRM=INITIALIZE_DISPOSABLE_DATABASE"
+node scripts\init-maintenance-disposable.mjs --apply > "%TEMP%\maintenance-init.json" 2>&1
+set "MAINTENANCE_INITIALIZE_CONFIRM="
+```
+
+Check each exit code before continuing. Dry-run checks target identity and
+emptiness. Apply stops at F006-4a. If a stage fails, preserve the report and
+inspect the last failed stage and preceding applied stages. Never rerun apply
+on that database. Use a fresh disposable project or manually verify the committed
+schema and resume from the first demonstrably unapplied file after owner review.
+Keep the local rehearsal switch unset for Cloud.
+
+After owner approval, run the Cloud harness with the separate destructive
+confirmation from above. Save stdout outside Git. The JSON evidence contains
+the operation ID for recovery. If cleanup fails, compare it with the active
+operation, enable audit, and expected version before considering manual disable.
+
+## Additional Storage validation on the disposable project
+
+Use a fresh run prefix and establish a successful inactive control for each
+operation. For signed uploads, create the token before enable and attempt the
+upload while active. For TUS, test both a new upload and a paused upload started
+before enable, then attempt finalization after enable. For the timeout case,
+interrupt the client's wait, let server work settle, and inspect the same key
+before retrying or deleting. For a privileged writer use test-only S3 credentials
+and compare inactive and active writes, then revoke the credentials.
+
+Capture maintenance-specific errors and verify metadata, API visibility and,
+when available, S3 visibility separately. If the backend cannot be inspected
+directly, physical absence remains UNVERIFIED even if the S3-compatible
+endpoint reports no object. Treat unexpected successful writes or ambiguous
+cleanup as blockers. This section is a manual test protocol.
