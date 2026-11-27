@@ -5,10 +5,11 @@ The canonical complete ordered list is
 For Phase 1 follow [F005-1 deployment](../docs/production/F005-1-CATALOG-DEPLOYMENT.md).
 The owner reported F005-1, F005-1a and F006-1 through F006-4 as already applied
 and verified in Production; do not rerun any of them. Codex did not execute those
-Production migrations. The next proposed, separately reviewed change is the
-forward-only `f006-5-phase2-payment-lifecycle-foundation.sql`. Follow the canonical
-manifest and F006-5 review; save its read-only preflight baselines and paste them
-explicitly into the read-only post-verify after owner deployment.
+Production migrations. The next proposed change is the inactive, forward-only
+`f006-4a-production-maintenance-foundation.sql`; it must be reviewed and installed
+before F006-5. Follow the canonical manifest and Production Maintenance runbook.
+F006-5 remains unapplied and follows F006-4a; save its read-only preflight
+baselines and paste them explicitly into its read-only post-verify.
 The F004 checklist below is historical feature-specific guidance, not an instruction
 to rerun migrations or reset existing preorder values.
 

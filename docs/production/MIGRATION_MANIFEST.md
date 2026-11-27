@@ -65,7 +65,13 @@ in this order. Do not rerun historical migrations merely because they appear her
     Production by the owner and post-verified; do not rerun.** Codex did not
     execute it. The mixed-cart and expiry RPCs intentionally have no browser grants. See
     [F006-4 review](F006-4-PR-C1-WEIGHTED-CHECKOUT-FOUNDATION.md).
-34. `supabase/f006-5-phase2-payment-lifecycle-foundation.sql` — Phase 2 PR-C2.1
+34. `supabase/f006-4a-production-maintenance-foundation.sql` — reusable
+    Production Maintenance foundation. **Not applied to Production.** It is
+    installed inactive, must follow F006-4 and must precede F006-5. Use the
+    dedicated read-only preflight/post-verify and the
+    [maintenance runbook](PRODUCTION-MAINTENANCE-RUNBOOK.md). It does not enable
+    maintenance or alter business rows.
+35. `supabase/f006-5-phase2-payment-lifecycle-foundation.sql` — Phase 2 PR-C2.1
     proposed forward-only payment-report, guest access-token hash, same-phone
     order guard, controlled cancellation, immutable checkout snapshot, and
     notification-outbox foundation. **Not applied to Production.** The owner must
